@@ -1,30 +1,67 @@
 'use client'
 
-import { useState } from 'react'
-import { X, Save, Eye, Zap } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { X, Save, Eye, Zap, Terminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card } from '@/components/ui/card'
+import type { Telemetry } from '@/lib/types'
+
+type LogEntry = {
+  id: string
+  time: Date
+  type: 'send' | 'recv' | 'error'
+  msg: string
+}
 
 export function PinManagerModal({
   isOpen,
   onClose,
   onSend,
   isSending,
+  latestTelemetry,
 }: {
   isOpen: boolean
   onClose: () => void
   onSend: (payload: Record<string, unknown>) => Promise<void>
   isSending: boolean
+  latestTelemetry?: Telemetry | null
 }) {
   const [pin, setPin] = useState('')
   const [action, setAction] = useState<'mode' | 'read' | 'write'>('read')
   const [mode, setMode] = useState<'INPUT' | 'OUTPUT' | 'INPUT_PULLUP'>('INPUT')
   const [writeVal, setWriteVal] = useState('1')
+  const [logs, setLogs] = useState<LogEntry[]>([])
+  
+  const lastTeleId = useRef<number | null>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  // Scroll to bottom when logs change
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    }
+  }, [logs])
+
+  // Watch telemetry for pin responses
+  useEffect(() => {
+    if (!isOpen || !latestTelemetry) return
+    if (latestTelemetry.id === lastTeleId.current) return
+    lastTeleId.current = latestTelemetry.id
+
+    const payload = latestTelemetry.payload as Record<string, any>
+    
+    // Catch anything related to pins
+    const pinKeys = Object.keys(payload).filter(k => k.startsWith('pin_') || k === 'pin_error' || k === 'pin_status')
+    if (pinKeys.length > 0) {
+      const msg = pinKeys.map(k => `${k}: ${payload[k]}`).join(', ')
+      setLogs(prev => [...prev, { id: Date.now().toString(), time: new Date(), type: payload.pin_error ? 'error' : 'recv', msg: `<- ${msg}` }])
+    }
+  }, [latestTelemetry, isOpen])
 
   if (!isOpen) return null
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const pinNum = parseInt(pin, 10)
     if (isNaN(pinNum)) return
 
@@ -37,12 +74,21 @@ export function PinManagerModal({
       payload = { action: 'pin_write', pin: pinNum, value: parseInt(writeVal, 10) }
     }
     
-    onSend(payload)
+    const msg = `-> ${JSON.stringify(payload)}`
+    setLogs(prev => [...prev, { id: Date.now().toString(), time: new Date(), type: 'send', msg }])
+    
+    try {
+      await onSend(payload)
+    } catch (e: any) {
+      setLogs(prev => [...prev, { id: Date.now().toString(), time: new Date(), type: 'error', msg: `Ошибка: ${e.message}` }])
+    }
   }
+
+  const formatTime = (d: Date) => d.toLocaleTimeString('ru-RU', { hour12: false, hour: '2-digit', minute:'2-digit', second:'2-digit' })
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-      <Card className="w-full max-w-sm overflow-hidden flex flex-col border-border/50 shadow-2xl">
+      <Card className="w-full max-w-md overflow-hidden flex flex-col border-border/50 shadow-2xl">
         <div className="flex items-center justify-between p-4 border-b border-border bg-muted/30">
           <h3 className="font-semibold flex items-center gap-2 text-foreground">
             <Zap className="size-4 text-emerald-500" />
@@ -116,8 +162,37 @@ export function PinManagerModal({
           )}
         </div>
 
+        {/* Console / Log area */}
+        <div className="border-t border-border bg-black/90 p-3 h-40 flex flex-col">
+          <div className="flex items-center gap-1.5 mb-2 text-[10px] font-semibold text-zinc-500 uppercase tracking-widest shrink-0">
+            <Terminal className="size-3" />
+            Терминал команд
+          </div>
+          <div 
+            ref={scrollRef}
+            className="flex-1 overflow-y-auto space-y-1 font-mono text-[11px]"
+          >
+            {logs.length === 0 ? (
+              <div className="text-zinc-600 italic">Ожидание команд...</div>
+            ) : (
+              logs.map((log) => (
+                <div key={log.id} className="flex gap-2">
+                  <span className="text-zinc-500 shrink-0">[{formatTime(log.time)}]</span>
+                  <span className={`${
+                    log.type === 'send' ? 'text-blue-400' : 
+                    log.type === 'error' ? 'text-red-400' : 
+                    'text-emerald-400'
+                  } break-all`}>
+                    {log.msg}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
         <div className="p-4 border-t border-border bg-muted/10 flex justify-end gap-2">
-          <Button variant="ghost" size="sm" onClick={onClose} disabled={isSending}>Отмена</Button>
+          <Button variant="ghost" size="sm" onClick={onClose} disabled={isSending}>Закрыть</Button>
           <Button size="sm" onClick={handleSend} disabled={!pin || isSending}>
             {isSending ? 'Отправка...' : (
               action === 'read' ? <><Eye className="size-3 mr-1.5"/>Прочитать</> : <><Save className="size-3 mr-1.5"/>Отправить</>

@@ -467,9 +467,9 @@ export function DeviceCard({
       onClose={() => setIsPinModalOpen(false)}
       onSend={async (payload) => {
         await send(payload, 'pin')
-        setIsPinModalOpen(false)
       }}
       isSending={sending === 'pin'}
+      latestTelemetry={device.latest}
     />
 
     <FileManagerModal
