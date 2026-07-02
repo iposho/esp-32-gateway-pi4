@@ -42,7 +42,7 @@ export function Dashboard() {
 
   async function logout() {
     await fetch('/api/auth/logout', { method: 'POST' })
-    router.replace('/login')
+    router.replace('/')
     router.refresh()
   }
 

@@ -1,7 +1,8 @@
 'use client'
 
+import Link from 'next/link'
 import { useState } from 'react'
-import { Cpu, LoaderCircle, LockKeyhole } from 'lucide-react'
+import { ArrowLeft, Cpu, LoaderCircle, LockKeyhole } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -27,7 +28,7 @@ export default function LoginPage() {
         setError(data.error ?? 'Ошибка входа')
         return
       }
-      window.location.assign('/')
+      window.location.assign('/dashboard')
     } catch {
       setError('Сеть недоступна')
     } finally {
@@ -36,7 +37,16 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background px-4">
+    <main className="flex min-h-screen flex-col items-center justify-center bg-background px-4">
+      <div className="mb-6 w-full max-w-sm">
+        <Link
+          href="/"
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ArrowLeft className="size-4" />
+          На главную
+        </Link>
+      </div>
       <div className="w-full max-w-sm">
         <div className="mb-6 flex flex-col items-center gap-3 text-center">
           <div className="flex size-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">
