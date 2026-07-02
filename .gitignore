@@ -17,3 +17,4 @@ mosquitto/config/passwd
 node_modules
 .next/
 .DS_Store
+.history/

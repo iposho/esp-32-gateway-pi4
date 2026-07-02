@@ -40,6 +40,21 @@ export function Dashboard() {
     [],
   )
 
+  const deleteDevice = useCallback(
+    async (deviceId: string) => {
+      const res = await fetch(`/api/devices/${deviceId}`, {
+        method: 'DELETE',
+      })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        throw new Error(d.error ?? 'Ошибка при удалении')
+      }
+      // Revalidate cache
+      mutate()
+    },
+    [mutate]
+  )
+
   async function logout() {
     await fetch('/api/auth/logout', { method: 'POST' })
     router.replace('/')
@@ -47,24 +62,24 @@ export function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
+    <div className="min-h-screen bg-zinc-50 dark:bg-black">
+      <header className="sticky top-0 z-10 border-b border-zinc-200 bg-white/80 backdrop-blur dark:border-zinc-800 dark:bg-black/80">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4">
           <div className="flex items-center gap-3">
-            <div className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <div className="flex size-9 items-center justify-center rounded-md bg-black text-white dark:bg-white dark:text-black shadow-sm">
               <Cpu className="size-5" />
             </div>
             <div>
-              <h1 className="font-semibold leading-tight">ESP32 Gateway</h1>
-              <p className="text-xs text-muted-foreground">esp32.kuzyak.in</p>
+              <h1 className="text-sm font-medium leading-tight">ESP32 Gateway</h1>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">esp32.kuzyak.in</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={() => mutate()}>
+            <Button variant="ghost" size="sm" onClick={() => mutate()} className="text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100">
               <RefreshCw className={`size-4 ${isLoading ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline">Обновить</span>
             </Button>
-            <Button variant="outline" size="sm" onClick={logout}>
+            <Button variant="outline" size="sm" onClick={logout} className="border-zinc-200 dark:border-zinc-800">
               <LogOut className="size-4" />
               <span className="hidden sm:inline">Выход</span>
             </Button>
@@ -72,57 +87,62 @@ export function Dashboard() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 py-6">
+      <main className="mx-auto max-w-6xl px-4 py-8">
         {/* Сводка */}
-        <div className="mb-6 grid grid-cols-3 gap-3">
+        <div className="mb-8 grid grid-cols-1 sm:grid-cols-3 gap-4">
           <StatCard
             icon={<Radio className="size-4" />}
             label="Всего устройств"
             value={devices.length}
           />
           <StatCard
-            icon={<Wifi className="size-4 text-online" />}
+            icon={<Wifi className="size-4 text-emerald-500" />}
             label="Онлайн"
             value={online}
           />
           <StatCard
-            icon={<WifiOff className="size-4 text-offline" />}
+            icon={<WifiOff className="size-4 text-zinc-400" />}
             label="Оффлайн"
             value={devices.length - online}
           />
         </div>
 
-        <CommandsReference />
-
         {error && (
-          <Card className="mb-6 border-destructive/40">
-            <CardContent className="py-4 text-sm text-destructive">
-              Не удалось загрузить устройства. Проверьте подключение к Supabase
-              (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY).
+          <Card className="mb-8 border-red-500/20 bg-red-50/50 dark:bg-red-950/20">
+            <CardContent className="py-4 text-sm text-red-600 dark:text-red-400">
+              Не удалось загрузить устройства. Проверьте подключение к Supabase.
             </CardContent>
           </Card>
         )}
 
         {isLoading && devices.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Загрузка…</p>
+          <div className="flex items-center justify-center py-20 text-sm text-zinc-500">
+            Загрузка списка устройств...
+          </div>
         ) : devices.length === 0 ? (
-          <Card>
-            <CardContent className="flex flex-col items-center gap-2 py-12 text-center">
-              <Radio className="size-8 text-muted-foreground" />
-              <p className="font-medium">Устройств пока нет</p>
-              <p className="max-w-sm text-sm text-muted-foreground text-balance">
-                Как только ESP32 отправит сообщение в MQTT, Node-RED создаст запись
-                в Supabase и устройство появится здесь.
+          <Card className="border-dashed border-zinc-200 dark:border-zinc-800 bg-transparent shadow-none">
+            <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
+              <div className="rounded-full bg-zinc-100 p-3 dark:bg-zinc-900">
+                <Radio className="size-6 text-zinc-400" />
+              </div>
+              <h3 className="font-medium">Устройств пока нет</h3>
+              <p className="max-w-sm text-sm text-zinc-500 text-balance">
+                Как только ESP32 отправит сообщение в MQTT, Node-RED создаст запись,
+                и устройство появится здесь.
               </p>
             </CardContent>
           </Card>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {devices.map((d) => (
-              <DeviceCard key={d.id} device={d} onCommand={sendCommand} />
+              <DeviceCard key={d.id} device={d} onCommand={sendCommand} onDelete={deleteDevice} />
             ))}
           </div>
         )}
+
+        <div className="mt-12">
+          <CommandsReference />
+        </div>
       </main>
     </div>
   )
@@ -138,14 +158,15 @@ function StatCard({
   value: number
 }) {
   return (
-    <Card>
-      <CardContent className="flex flex-col gap-1 p-4">
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+    <Card className="border-zinc-200 shadow-sm dark:border-zinc-800">
+      <CardContent className="flex flex-col gap-2 p-5">
+        <div className="flex items-center gap-2 text-sm font-medium text-zinc-500 dark:text-zinc-400">
           {icon}
           <span className="truncate">{label}</span>
         </div>
-        <span className="text-2xl font-semibold tabular-nums">{value}</span>
+        <span className="text-3xl font-semibold tracking-tight">{value}</span>
       </CardContent>
     </Card>
   )
 }
+
