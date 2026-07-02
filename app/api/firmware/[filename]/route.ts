@@ -20,6 +20,7 @@ export async function GET(
     return new NextResponse(fileBuffer, {
       status: 200,
       headers: {
+        'Content-Length': fileBuffer.length.toString(),
         'Content-Type': 'application/octet-stream',
         'Content-Disposition': `attachment; filename="${filename}"`,
         'Cache-Control': 'no-store, max-age=0',
