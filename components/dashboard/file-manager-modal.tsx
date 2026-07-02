@@ -30,15 +30,17 @@ export function FileManagerModal({
   useEffect(() => {
     if (!isOpen || !latestTelemetry) return
 
-    if (viewMode === 'list' && latestTelemetry.fs_ls) {
-      if (Array.isArray(latestTelemetry.fs_ls)) {
-        setFileList(latestTelemetry.fs_ls)
+    const payload = latestTelemetry.payload as Record<string, any>
+
+    if (viewMode === 'list' && payload.fs_ls) {
+      if (Array.isArray(payload.fs_ls)) {
+        setFileList(payload.fs_ls)
         setIsRefreshing(false)
       }
     }
 
-    if (viewMode === 'edit' && latestTelemetry.fs_file === editingFile && typeof latestTelemetry.content === 'string') {
-      setFileContent(latestTelemetry.content)
+    if (viewMode === 'edit' && payload.fs_file === editingFile && typeof payload.content === 'string') {
+      setFileContent(payload.content)
     }
   }, [latestTelemetry, isOpen, viewMode, editingFile])
 
