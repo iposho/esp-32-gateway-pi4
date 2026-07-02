@@ -9,11 +9,13 @@ export async function GET(
   { params }: { params: { deviceId: string } },
 ) {
   const { deviceId } = params
+  console.log(`[Camera Proxy] Request for device: ${deviceId}`)
 
   let supabase
   try {
     supabase = getServiceClient()
   } catch (e) {
+    console.error(`[Camera Proxy] Supabase client error:`, e)
     return new NextResponse('Internal Server Error', { status: 503 })
   }
 
@@ -27,6 +29,7 @@ export async function GET(
     .single()
 
   if (error || !tele) {
+    console.error(`[Camera Proxy] Telemetry not found for ${deviceId}:`, error?.message)
     return new NextResponse('Telemetry not found', { status: 404 })
   }
 
@@ -34,17 +37,31 @@ export async function GET(
   const url = payload.last_photo_url as string | undefined
 
   if (!url) {
+    console.error(`[Camera Proxy] No photo URL in telemetry for ${deviceId}`)
     return new NextResponse('No photo URL in telemetry', { status: 404 })
   }
 
+  console.log(`[Camera Proxy] Found URL: ${url} for device ${deviceId}`)
+
   try {
     // Проксируем запрос к локальному IP-адресу камеры
-    const response = await fetch(url, { cache: 'no-store' })
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 10000) // 10s timeout
+    
+    const response = await fetch(url, { 
+      cache: 'no-store',
+      signal: controller.signal
+    })
+    
+    clearTimeout(timeoutId)
+
     if (!response.ok) {
+      console.error(`[Camera Proxy] Camera returned status ${response.status} ${response.statusText}`)
       return new NextResponse('Error fetching image from camera', { status: 502 })
     }
 
     const imageBuffer = await response.arrayBuffer()
+    console.log(`[Camera Proxy] Successfully fetched image, size: ${imageBuffer.byteLength} bytes`)
 
     return new NextResponse(imageBuffer, {
       status: 200,
@@ -54,6 +71,8 @@ export async function GET(
       },
     })
   } catch (e) {
+    console.error(`[Camera Proxy] Fetch error for URL ${url}:`, e)
     return new NextResponse('Failed to connect to camera', { status: 502 })
   }
 }
+
