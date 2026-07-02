@@ -15,6 +15,7 @@ import {
   Terminal,
   Activity,
   Upload,
+  Cpu,
 } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -23,6 +24,7 @@ import { Input } from '@/components/ui/input'
 import { timeAgo, formatValue, labelForKey } from '@/lib/format'
 import type { Device, Telemetry } from '@/lib/types'
 import { toast } from 'sonner'
+import { PinManagerModal } from './pin-manager-modal'
 
 
 type DeviceWithLatest = Device & { latest: Telemetry | null }
@@ -44,6 +46,7 @@ export function DeviceCard({
   const [imgTimestamp, setImgTimestamp] = useState(Date.now())
   const [imgLoading, setImgLoading] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
+  const [isPinModalOpen, setIsPinModalOpen] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const online = device.is_online
@@ -154,8 +157,9 @@ export function DeviceCard({
     device.device_id.toLowerCase().includes('balcony')
 
   return (
-    <Card
-      className={`group/card relative flex flex-col overflow-hidden transition-all duration-300 ${
+    <>
+      <Card
+        className={`group/card relative flex flex-col overflow-hidden transition-all duration-300 ${
         isDeleting ? 'opacity-50 pointer-events-none scale-[0.98]' : ''
       } ${online ? 'hover:shadow-md hover:shadow-emerald-500/5' : 'hover:shadow-md'}`}
     >
@@ -377,6 +381,15 @@ export function DeviceCard({
             <Upload className={`size-3 ${isUploading ? 'animate-bounce' : ''}`} />
             {isUploading ? 'OTA...' : 'OTA'}
           </Button>
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={!online || sending !== null}
+            onClick={() => setIsPinModalOpen(true)}
+          >
+            <Cpu className="size-3" />
+            Пины
+          </Button>
           <input
             type="file"
             accept=".bin"
@@ -436,5 +449,16 @@ export function DeviceCard({
         </div>
       </div>
     </Card>
+    
+    <PinManagerModal
+      isOpen={isPinModalOpen}
+      onClose={() => setIsPinModalOpen(false)}
+      onSend={async (payload) => {
+        await send(payload, 'pin')
+        setIsPinModalOpen(false)
+      }}
+      isSending={sending === 'pin'}
+    />
+    </>
   )
 }
