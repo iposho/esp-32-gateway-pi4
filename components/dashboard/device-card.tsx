@@ -19,7 +19,7 @@ import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { timeAgo, formatValue } from '@/lib/format'
+import { timeAgo, formatValue, labelForKey } from '@/lib/format'
 import type { Device, Telemetry } from '@/lib/types'
 import { toast } from 'sonner'
 
@@ -258,9 +258,9 @@ export function DeviceCard({
                     i > 0 ? 'border-t border-border/50' : ''
                   }`}
                 >
-                  <span className="truncate text-xs text-muted-foreground">{k}</span>
+                  <span className="truncate text-xs text-muted-foreground">{labelForKey(k)}</span>
                   <span className="font-mono text-xs font-medium text-foreground tabular-nums shrink-0">
-                    {formatValue(v)}
+                    {formatValue(v, k)}
                   </span>
                 </div>
               ))}
