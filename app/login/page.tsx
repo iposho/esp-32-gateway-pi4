@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 export default function LoginPage() {
-  const [user, setUser] = useState('')
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -21,7 +21,7 @@ export default function LoginPage() {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user, password }),
+        body: JSON.stringify({ email, password }),
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
@@ -68,16 +68,18 @@ export default function LoginPage() {
           <CardContent>
             <form onSubmit={handleSubmit} className="flex flex-col gap-4">
               <div className="flex flex-col gap-1.5">
-                <label htmlFor="user" className="text-sm font-medium">
-                  Логин
+                <label htmlFor="email" className="text-sm font-medium">
+                  Email
                 </label>
                 <Input
-                  id="user"
-                  autoComplete="username"
-                  value={user}
-                  onChange={(e) => setUser(e.target.value)}
+                  id="email"
+                  type="email"
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   required
                   autoFocus
+                  placeholder="admin@example.com"
                 />
               </div>
               <div className="flex flex-col gap-1.5">
@@ -112,7 +114,7 @@ export default function LoginPage() {
         </Card>
 
         <p className="mt-4 text-center text-xs text-muted-foreground text-balance">
-          Учётные данные задаются переменными ADMIN_USER / ADMIN_PASSWORD
+          Авторизация через Supabase Auth
         </p>
       </div>
     </main>

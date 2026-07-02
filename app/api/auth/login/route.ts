@@ -1,33 +1,33 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import {
-  SESSION_COOKIE,
-  SESSION_MAX_AGE,
-  createSessionToken,
-  verifyCredentials,
-} from '@/lib/auth'
+import { getAuthClient } from '@/lib/supabase/server'
 
 export async function POST(req: NextRequest) {
-  let body: { user?: string; password?: string }
+  let body: { email?: string; password?: string }
   try {
     body = await req.json()
   } catch {
     return NextResponse.json({ error: 'invalid body' }, { status: 400 })
   }
 
-  const { user = '', password = '' } = body
+  const { email = '', password = '' } = body
 
-  if (!verifyCredentials(user, password)) {
-    return NextResponse.json({ error: 'Неверный логин или пароль' }, { status: 401 })
+  if (!email || !password) {
+    return NextResponse.json({ error: 'Email и пароль обязательны' }, { status: 400 })
   }
 
-  const token = await createSessionToken()
-  const res = NextResponse.json({ ok: true })
-  res.cookies.set(SESSION_COOKIE, token, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: req.nextUrl.protocol === 'https:',
-    path: '/',
-    maxAge: SESSION_MAX_AGE,
+  const supabase = await getAuthClient()
+
+  const { error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
   })
-  return res
+
+  if (error) {
+    return NextResponse.json(
+      { error: 'Неверный email или пароль' },
+      { status: 401 },
+    )
+  }
+
+  return NextResponse.json({ ok: true })
 }

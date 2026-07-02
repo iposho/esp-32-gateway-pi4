@@ -1,4 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import { createServerClient } from '@supabase/ssr'
+import { cookies } from 'next/headers'
 
 /**
  * Серверный клиент Supabase с service_role ключом.
@@ -28,3 +30,35 @@ export function getServiceClient(): SupabaseClient {
 
   return cached
 }
+
+/**
+ * Серверный клиент Supabase для API routes с cookie-based сессией.
+ * Использует anon key — операции идут через RLS от имени текущего пользователя.
+ * Для data-запросов, не требующих проверки пользователя, используйте getServiceClient().
+ */
+export async function getAuthClient() {
+  const cookieStore = await cookies()
+
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll()
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options),
+            )
+          } catch {
+            // setAll вызывается из Server Component — куки read-only, это ок.
+            // Middleware обновит куки при следующем запросе.
+          }
+        },
+      },
+    },
+  )
+}
+
