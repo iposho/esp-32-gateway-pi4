@@ -3,7 +3,15 @@
 import { useCallback } from 'react'
 import useSWR from 'swr'
 import { useRouter } from 'next/navigation'
-import { Cpu, LogOut, RefreshCw, Radio, Wifi, WifiOff } from 'lucide-react'
+import {
+  Cpu,
+  LogOut,
+  RefreshCw,
+  Radio,
+  Wifi,
+  WifiOff,
+  Activity,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { DeviceCard } from './device-card'
@@ -22,7 +30,11 @@ export function Dashboard() {
     { refreshInterval: 3000, keepPreviousData: true },
   )
 
-  const devices = data?.devices ?? []
+  const rawDevices = data?.devices ?? []
+  const devices = [...rawDevices].sort((a, b) => {
+    if (a.is_online === b.is_online) return 0
+    return a.is_online ? -1 : 1
+  })
   const online = devices.filter((d) => d.is_online).length
 
   const sendCommand = useCallback(
@@ -62,85 +74,104 @@ export function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-black">
-      <header className="sticky top-0 z-10 border-b border-zinc-200 bg-white/80 backdrop-blur dark:border-zinc-800 dark:bg-black/80">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4">
+    <div className="min-h-screen bg-background">
+      {/* ── Sticky header ── */}
+      <header className="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 sm:px-6 py-3">
           <div className="flex items-center gap-3">
-            <div className="flex size-9 items-center justify-center rounded-md bg-black text-white dark:bg-white dark:text-black shadow-sm">
-              <Cpu className="size-5" />
+            <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
+              <Cpu className="size-4" />
             </div>
             <div>
-              <h1 className="text-sm font-medium leading-tight">ESP32 Gateway</h1>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">esp32.kuzyak.in</p>
+              <h1 className="text-sm font-semibold leading-tight text-foreground">ESP32 Gateway</h1>
+              <p className="text-[11px] text-muted-foreground">esp32.kuzyak.in</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={() => mutate()} className="text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100">
-              <RefreshCw className={`size-4 ${isLoading ? 'animate-spin' : ''}`} />
+          <div className="flex items-center gap-1.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => mutate()}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <RefreshCw className={`size-3.5 ${isLoading ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline">Обновить</span>
             </Button>
-            <Button variant="outline" size="sm" onClick={logout} className="border-zinc-200 dark:border-zinc-800">
-              <LogOut className="size-4" />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={logout}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <LogOut className="size-3.5" />
               <span className="hidden sm:inline">Выход</span>
             </Button>
           </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 py-8">
-        {/* Сводка */}
-        <div className="mb-8 grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <main className="mx-auto max-w-6xl px-4 sm:px-6 py-6">
+        {/* ── Stats row ── */}
+        <div className="mb-6 grid grid-cols-3 gap-3">
           <StatCard
             icon={<Radio className="size-4" />}
-            label="Всего устройств"
+            label="Всего"
             value={devices.length}
+            color="default"
           />
           <StatCard
-            icon={<Wifi className="size-4 text-emerald-500" />}
+            icon={<Wifi className="size-4" />}
             label="Онлайн"
             value={online}
+            color="online"
           />
           <StatCard
-            icon={<WifiOff className="size-4 text-zinc-400" />}
+            icon={<WifiOff className="size-4" />}
             label="Оффлайн"
             value={devices.length - online}
+            color="offline"
           />
         </div>
 
+        {/* ── Error ── */}
         {error && (
-          <Card className="mb-8 border-red-500/20 bg-red-50/50 dark:bg-red-950/20">
-            <CardContent className="py-4 text-sm text-red-600 dark:text-red-400">
+          <Card className="mb-6 border-destructive/20 bg-destructive/5">
+            <CardContent className="py-3 px-4 text-sm text-destructive flex items-center gap-2">
+              <Activity className="size-4 shrink-0" />
               Не удалось загрузить устройства. Проверьте подключение к Supabase.
             </CardContent>
           </Card>
         )}
 
+        {/* ── Devices grid ── */}
         {isLoading && devices.length === 0 ? (
-          <div className="flex items-center justify-center py-20 text-sm text-zinc-500">
-            Загрузка списка устройств...
+          <div className="flex flex-col items-center justify-center py-20 gap-3">
+            <RefreshCw className="size-5 animate-spin text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">Загрузка списка устройств...</span>
           </div>
         ) : devices.length === 0 ? (
-          <Card className="border-dashed border-zinc-200 dark:border-zinc-800 bg-transparent shadow-none">
+          <Card className="border-dashed bg-transparent shadow-none">
             <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
-              <div className="rounded-full bg-zinc-100 p-3 dark:bg-zinc-900">
-                <Radio className="size-6 text-zinc-400" />
+              <div className="flex size-12 items-center justify-center rounded-full bg-muted">
+                <Radio className="size-5 text-muted-foreground" />
               </div>
-              <h3 className="font-medium">Устройств пока нет</h3>
-              <p className="max-w-sm text-sm text-zinc-500 text-balance">
+              <h3 className="font-semibold text-foreground">Устройств пока нет</h3>
+              <p className="max-w-sm text-sm text-muted-foreground text-balance">
                 Как только ESP32 отправит сообщение в MQTT, Node-RED создаст запись,
                 и устройство появится здесь.
               </p>
             </CardContent>
           </Card>
         ) : (
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {devices.map((d) => (
               <DeviceCard key={d.id} device={d} onCommand={sendCommand} onDelete={deleteDevice} />
             ))}
           </div>
         )}
 
-        <div className="mt-12">
+        {/* ── Commands reference ── */}
+        <div className="mt-10">
           <CommandsReference />
         </div>
       </main>
@@ -148,25 +179,45 @@ export function Dashboard() {
   )
 }
 
+/* ── Stat Card ── */
 function StatCard({
   icon,
   label,
   value,
+  color,
 }: {
   icon: React.ReactNode
   label: string
   value: number
+  color: 'default' | 'online' | 'offline'
 }) {
+  const colorStyles = {
+    default: 'text-muted-foreground',
+    online: 'text-emerald-600 dark:text-emerald-400',
+    offline: 'text-muted-foreground/60',
+  }
+
+  const iconBgStyles = {
+    default: 'bg-muted text-muted-foreground',
+    online: 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-400/10 dark:text-emerald-400',
+    offline: 'bg-muted text-muted-foreground/60',
+  }
+
   return (
-    <Card className="border-zinc-200 shadow-sm dark:border-zinc-800">
-      <CardContent className="flex flex-col gap-2 p-5">
-        <div className="flex items-center gap-2 text-sm font-medium text-zinc-500 dark:text-zinc-400">
+    <Card className="overflow-hidden">
+      <CardContent className="flex items-center gap-3 p-4">
+        <div className={`flex size-9 shrink-0 items-center justify-center rounded-lg ${iconBgStyles[color]}`}>
           {icon}
-          <span className="truncate">{label}</span>
         </div>
-        <span className="text-3xl font-semibold tracking-tight">{value}</span>
+        <div className="min-w-0 flex-1">
+          <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider truncate">
+            {label}
+          </p>
+          <p className={`text-2xl font-bold tracking-tight tabular-nums ${colorStyles[color]}`}>
+            {value}
+          </p>
+        </div>
       </CardContent>
     </Card>
   )
 }
-

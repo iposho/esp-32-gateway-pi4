@@ -153,4 +153,4 @@ docker-compose.yml       # единый стек
 |-------|-------------|---------|
 | `devices/<id>/status` | ESP32 → | `{"status":"online"}` (retained + LWT) |
 | `devices/<id>/telemetry` | ESP32 → | `{"uptime":123,"rssi":-60,"heap":40000}` |
-| `devices/<id>/command` | → ESP32 | `{"action":"relay","value":true}` |
+| `devices/<id>/command` | → ESP32 | `{"action":"relay","value":true}`<br>`{"action":"push"}` (Отправка в Supabase)<br>`{"action":"sync"}` (NTP-синхронизация) |
