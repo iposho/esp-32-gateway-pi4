@@ -16,6 +16,7 @@ import {
   Activity,
   Upload,
   Cpu,
+  FolderOpen,
 } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -25,6 +26,7 @@ import { timeAgo, formatValue, labelForKey } from '@/lib/format'
 import type { Device, Telemetry } from '@/lib/types'
 import { toast } from 'sonner'
 import { PinManagerModal } from './pin-manager-modal'
+import { FileManagerModal } from './file-manager-modal'
 
 
 type DeviceWithLatest = Device & { latest: Telemetry | null }
@@ -47,6 +49,7 @@ export function DeviceCard({
   const [imgLoading, setImgLoading] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [isPinModalOpen, setIsPinModalOpen] = useState(false)
+  const [isFileModalOpen, setIsFileModalOpen] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const online = device.is_online
@@ -390,6 +393,15 @@ export function DeviceCard({
             <Cpu className="size-3" />
             Пины
           </Button>
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={!online || sending !== null}
+            onClick={() => setIsFileModalOpen(true)}
+          >
+            <FolderOpen className="size-3" />
+            Файлы
+          </Button>
           <input
             type="file"
             accept=".bin"
@@ -458,6 +470,16 @@ export function DeviceCard({
         setIsPinModalOpen(false)
       }}
       isSending={sending === 'pin'}
+    />
+
+    <FileManagerModal
+      isOpen={isFileModalOpen}
+      onClose={() => setIsFileModalOpen(false)}
+      onSend={async (payload) => {
+        await send(payload, 'file')
+      }}
+      isSending={sending === 'file'}
+      latestTelemetry={device.latest}
     />
     </>
   )
