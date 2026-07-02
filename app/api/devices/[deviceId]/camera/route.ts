@@ -6,9 +6,9 @@ export const dynamic = 'force-dynamic'
 
 export async function GET(
   req: Request,
-  { params }: { params: { deviceId: string } },
+  { params }: { params: Promise<{ deviceId: string }> },
 ) {
-  const { deviceId } = params
+  const { deviceId } = await params
   console.log(`[Camera Proxy] Request for device: ${deviceId}`)
 
   let supabase

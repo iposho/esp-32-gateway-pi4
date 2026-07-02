@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic'
 
 export async function DELETE(
   req: Request,
-  { params }: { params: { deviceId: string } },
+  { params }: { params: Promise<{ deviceId: string }> },
 ) {
   let supabase
   try {
@@ -17,7 +17,7 @@ export async function DELETE(
     )
   }
 
-  const { deviceId } = params
+  const { deviceId } = await params
 
   if (!deviceId) {
     return NextResponse.json({ error: 'Device ID is required' }, { status: 400 })
