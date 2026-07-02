@@ -1,0 +1,88 @@
+# ============================================================
+# ESP32 Gateway — единый стек для Raspberry Pi
+#   admin      — Next.js админка (esp32.kuzyak.in)
+#   mosquitto  — MQTT-брокер
+#   nodered    — приём MQTT -> запись в self-hosted Supabase
+#
+# Supabase НЕ входит в этот стек — подключаемся к уже
+# работающему на Pi Supabase через внешнюю docker-сеть.
+# ============================================================
+
+services:
+  admin:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: esp32-admin
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Supabase доступен по имени сервиса kong во внешней сети
+      SUPABASE_URL: ${SUPABASE_URL:-http://kong:8000}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      # MQTT-брокер внутри общей внутренней сети
+      MQTT_URL: mqtt://mosquitto:1883
+      MQTT_USERNAME: ${MQTT_USERNAME:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+      # Авторизация админки
+      AUTH_SECRET: ${AUTH_SECRET}
+      ADMIN_USER: ${ADMIN_USER}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      NODE_ENV: production
+    ports:
+      # Пробрасываем только локально; наружу отдаёт reverse-proxy
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - mosquitto
+    networks:
+      - esp32-internal
+      - supabase
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: esp32-mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"   # MQTT — сюда подключаются ESP32
+      - "9001:9001"   # MQTT over WebSocket (опционально)
+    volumes:
+      - ./mosquitto/config:/mosquitto/config:ro
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
+    networks:
+      - esp32-internal
+
+  nodered:
+    image: nodered/node-red:4.0
+    container_name: esp32-nodered
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TZ: ${TZ:-Europe/Moscow}
+      SUPABASE_URL: ${SUPABASE_URL:-http://kong:8000}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+    ports:
+      # Редактор Node-RED — только локально/через прокси
+      - "127.0.0.1:1880:1880"
+    volumes:
+      - ./node-red/data:/data
+    depends_on:
+      - mosquitto
+    networks:
+      - esp32-internal
+      - supabase
+
+volumes:
+  mosquitto-data:
+  mosquitto-log:
+
+networks:
+  esp32-internal:
+    driver: bridge
+  # Внешняя сеть вашего self-hosted Supabase.
+  # Узнать имя: docker network ls | grep supabase
+  # Обычно это supabase_default. При необходимости задайте
+  # SUPABASE_NETWORK в .env.
+  supabase:
+    external: true
+    name: ${SUPABASE_NETWORK:-supabase_default}

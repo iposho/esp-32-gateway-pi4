@@ -1,0 +1,20 @@
+# ACL для Mosquitto
+#
+# Топики проекта:
+#   devices/<deviceId>/status     — публикует ESP32 (online/offline, LWT)
+#   devices/<deviceId>/telemetry  — публикует ESP32 (метрики)
+#   devices/<deviceId>/command    — публикует админка/Node-RED, читает ESP32
+
+# --- Пользователь для устройств ESP32 ---
+user esp32
+topic write devices/+/status
+topic write devices/+/telemetry
+topic read devices/+/command
+
+# --- Пользователь для бэкенда (Node-RED + админка) ---
+user backend
+topic readwrite devices/#
+
+# --- Пользователь для отладки (только чтение) ---
+user viewer
+topic read devices/#

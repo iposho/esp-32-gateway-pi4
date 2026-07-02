@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+.env*
+npm-debug.log
+Dockerfile
+docker-compose.yml
+README.md
+docker/mosquitto/data
+docker/mosquitto/log
+docker/nodered/data
+**/.DS_Store

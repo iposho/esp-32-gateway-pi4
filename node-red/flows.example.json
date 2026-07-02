@@ -1,0 +1,94 @@
+[
+  {
+    "id": "esp32-tab",
+    "type": "tab",
+    "label": "ESP32 → Supabase",
+    "disabled": false,
+    "info": "Подписка на MQTT и запись статусов/телеметрии в Supabase через PostgREST."
+  },
+  {
+    "id": "mqtt-broker",
+    "type": "mqtt-broker",
+    "name": "Mosquitto",
+    "broker": "mosquitto",
+    "port": "1883",
+    "clientid": "node-red",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true,
+    "birthTopic": "",
+    "closeTopic": "",
+    "willTopic": ""
+  },
+  {
+    "id": "mqtt-status",
+    "type": "mqtt in",
+    "z": "esp32-tab",
+    "name": "devices/+/status",
+    "topic": "devices/+/status",
+    "qos": "1",
+    "broker": "mqtt-broker",
+    "x": 160,
+    "y": 100,
+    "wires": [["fn-status"]]
+  },
+  {
+    "id": "fn-status",
+    "type": "function",
+    "z": "esp32-tab",
+    "name": "build status upsert",
+    "func": "const deviceId = msg.topic.split('/')[1];\nconst status = (typeof msg.payload === 'object') ? msg.payload.status : String(msg.payload);\nmsg.headers = {\n  'Content-Type': 'application/json',\n  'Prefer': 'resolution=merge-duplicates',\n  apikey: env.get('SERVICE_ROLE_KEY'),\n  Authorization: 'Bearer ' + env.get('SERVICE_ROLE_KEY')\n};\nmsg.method = 'POST';\nmsg.url = env.get('SUPABASE_REST') + '/devices?on_conflict=device_id';\nmsg.payload = [{ device_id: deviceId, status, last_seen: new Date().toISOString() }];\nreturn msg;",
+    "outputs": 1,
+    "x": 420,
+    "y": 100,
+    "wires": [["http-supabase"]]
+  },
+  {
+    "id": "mqtt-telemetry",
+    "type": "mqtt in",
+    "z": "esp32-tab",
+    "name": "devices/+/telemetry",
+    "topic": "devices/+/telemetry",
+    "qos": "1",
+    "broker": "mqtt-broker",
+    "x": 170,
+    "y": 200,
+    "wires": [["fn-telemetry"]]
+  },
+  {
+    "id": "fn-telemetry",
+    "type": "function",
+    "z": "esp32-tab",
+    "name": "build telemetry insert",
+    "func": "const deviceId = msg.topic.split('/')[1];\nlet data = msg.payload;\nif (typeof data !== 'object') { try { data = JSON.parse(data); } catch(e) { data = { value: data }; } }\nmsg.headers = {\n  'Content-Type': 'application/json',\n  apikey: env.get('SERVICE_ROLE_KEY'),\n  Authorization: 'Bearer ' + env.get('SERVICE_ROLE_KEY')\n};\nmsg.method = 'POST';\nmsg.url = env.get('SUPABASE_REST') + '/telemetry';\nmsg.payload = [{ device_id: deviceId, data, recorded_at: new Date().toISOString() }];\nreturn msg;",
+    "outputs": 1,
+    "x": 430,
+    "y": 200,
+    "wires": [["http-supabase"]]
+  },
+  {
+    "id": "http-supabase",
+    "type": "http request",
+    "z": "esp32-tab",
+    "name": "Supabase PostgREST",
+    "method": "use",
+    "ret": "obj",
+    "url": "",
+    "x": 720,
+    "y": 150,
+    "wires": [["dbg"]]
+  },
+  {
+    "id": "dbg",
+    "type": "debug",
+    "z": "esp32-tab",
+    "name": "result",
+    "active": true,
+    "complete": "payload",
+    "x": 900,
+    "y": 150,
+    "wires": []
+  }
+]
