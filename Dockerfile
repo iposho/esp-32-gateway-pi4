@@ -10,7 +10,8 @@ WORKDIR /app
 # ---- deps: устанавливаем зависимости ----
 FROM base AS deps
 COPY package.json pnpm-lock.yaml* ./
-RUN pnpm install --frozen-lockfile || pnpm install
+RUN pnpm config set dangerouslyAllowAllBuilds true \
+  && pnpm install --frozen-lockfile
 
 # ---- builder: собираем приложение ----
 FROM base AS builder

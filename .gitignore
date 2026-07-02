@@ -9,6 +9,9 @@ __v0_jsx-dev-runtime.ts
 # Environment variables
 .env
 .env*.local
+.env.mqtt-users
+node-red/data/
+mosquitto/config/passwd
 
 # Common ignores
 node_modules

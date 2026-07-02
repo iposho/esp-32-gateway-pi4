@@ -33,3 +33,11 @@ export function isDeviceOnline(lastSeen: string | null): boolean {
   if (!lastSeen) return false
   return Date.now() - new Date(lastSeen).getTime() < ONLINE_THRESHOLD_MS
 }
+
+/** Онлайн, если недавно был status или пришла телеметрия */
+export function isDeviceActive(
+  lastSeen: string | null,
+  telemetryAt: string | null,
+): boolean {
+  return isDeviceOnline(lastSeen) || isDeviceOnline(telemetryAt)
+}

@@ -35,12 +35,25 @@ void handleCommand(char *topic, byte *payload, unsigned int length) {
   StaticJsonDocument<256> doc;
   if (deserializeJson(doc, payload, length)) return;
 
-  const char *action = doc["action"];  // напр. "relay"
-  if (strcmp(action, "relay") == 0) {
-    bool on = doc["value"];
-    digitalWrite(2, on ? HIGH : LOW);  // пример: реле на GPIO2
+  const char *action = doc["action"];
+  if (!action) return;
+
+  if (strcmp(action, "led") == 0) {
+    bool on = doc["value"] | false;
+    digitalWrite(LED_BUILTIN, on ? HIGH : LOW);
+    return;
   }
-  // ...другие команды
+
+  if (strcmp(action, "relay") == 0) {
+    bool on = doc["value"] | false;
+    digitalWrite(2, on ? HIGH : LOW);
+    return;
+  }
+
+  if (strcmp(action, "reboot") == 0) {
+    delay(100);
+    ESP.restart();
+  }
 }
 
 void connect() {
@@ -51,12 +64,15 @@ void connect() {
       client.publish(topicStatus, "{\"status\":\"online\"}", true);
       client.subscribe(topicCommand, 1);
     } else {
-      delay(2000);
+      Serial.printf("[MQTT] connect failed, rc=%d\n", client.state());
+      delay(3000);
     }
   }
 }
 
 void setup() {
+  Serial.begin(115200);
+  pinMode(LED_BUILTIN, OUTPUT);
   pinMode(2, OUTPUT);
   snprintf(topicStatus, sizeof(topicStatus), "devices/%s/status", DEVICE_ID);
   snprintf(topicTelemetry, sizeof(topicTelemetry), "devices/%s/telemetry", DEVICE_ID);

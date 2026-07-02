@@ -1,13 +1,14 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { getServiceClient } from '@/lib/supabase/server'
+import { commandTopic } from '@/lib/commands'
 import { publishCommand } from '@/lib/mqtt'
 
 export const dynamic = 'force-dynamic'
 
 /**
  * Отправка команды на устройство.
- * По умолчанию топик: esp32/<deviceId>/cmd
- * payload — произвольный JSON, например { "relay": 1, "state": "on" }
+ * Топик: devices/<deviceId>/command
+ * payload — JSON, например { "action": "led", "value": true }
  */
 export async function POST(req: NextRequest) {
   let body: { deviceId?: string; topic?: string; payload?: Record<string, unknown> }
@@ -25,7 +26,7 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const topic = body.topic || `esp32/${deviceId}/cmd`
+  const topic = body.topic || commandTopic(deviceId)
   const supabase = getServiceClient()
 
   try {

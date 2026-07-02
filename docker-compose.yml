@@ -31,7 +31,7 @@ services:
       NODE_ENV: production
     ports:
       # Пробрасываем только локально; наружу отдаёт reverse-proxy
-      - "127.0.0.1:3000:3000"
+      - "3000:3000"
     depends_on:
       - mosquitto
     networks:
@@ -61,9 +61,14 @@ services:
       TZ: ${TZ:-Europe/Moscow}
       SUPABASE_URL: ${SUPABASE_URL:-http://kong:8000}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      # Имена, которые использует flow (env.get)
+      SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      SUPABASE_REST: ${SUPABASE_REST:-http://kong:8000/rest/v1}
+      MQTT_USERNAME: ${MQTT_USERNAME:-backend}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      NODE_RED_CREDENTIAL_SECRET: ${AUTH_SECRET}
     ports:
-      # Редактор Node-RED — только локально/через прокси
-      - "127.0.0.1:1880:1880"
+      - "1880:1880"
     volumes:
       - ./node-red/data:/data
     depends_on:

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getServiceClient } from '@/lib/supabase/server'
-import { isDeviceOnline, type Device, type Telemetry } from '@/lib/types'
+import { isDeviceActive, type Device, type Telemetry } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
 
@@ -42,12 +42,14 @@ export async function GET() {
     }
   }
 
-  const result = (devices as Device[]).map((d) => ({
-    ...d,
-    // is_online пересчитываем по времени последнего сообщения
-    is_online: isDeviceOnline(d.last_seen),
-    latest: latest[d.device_id] ?? null,
-  }))
+  const result = (devices as Device[]).map((d) => {
+    const latestRow = latest[d.device_id] ?? null
+    return {
+      ...d,
+      is_online: isDeviceActive(d.last_seen, latestRow?.created_at ?? null),
+      latest: latestRow,
+    }
+  })
 
   return NextResponse.json({ devices: result })
 }

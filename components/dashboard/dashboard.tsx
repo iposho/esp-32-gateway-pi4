@@ -7,6 +7,7 @@ import { Cpu, LogOut, RefreshCw, Radio, Wifi, WifiOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { DeviceCard } from './device-card'
+import { CommandsReference } from './commands-reference'
 import type { Device, Telemetry } from '@/lib/types'
 
 type DeviceWithLatest = Device & { latest: Telemetry | null }
@@ -90,6 +91,8 @@ export function Dashboard() {
             value={devices.length - online}
           />
         </div>
+
+        <CommandsReference />
 
         {error && (
           <Card className="mb-6 border-destructive/40">

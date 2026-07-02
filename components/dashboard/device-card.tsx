@@ -1,7 +1,16 @@
 'use client'
 
-import { useState } from 'react'
-import { Power, Send, Wifi, WifiOff, Gauge, ChevronDown } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import {
+  Lightbulb,
+  RotateCw,
+  Send,
+  Wifi,
+  WifiOff,
+  Gauge,
+  ChevronDown,
+  Check,
+} from 'lucide-react'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -18,20 +27,30 @@ export function DeviceCard({
   device: DeviceWithLatest
   onCommand: (deviceId: string, payload: Record<string, unknown>) => Promise<void>
 }) {
-  const [custom, setCustom] = useState('{ "relay": 1, "state": "on" }')
+  const [custom, setCustom] = useState('{ "action": "led", "value": true }')
   const [sending, setSending] = useState<string | null>(null)
+  const [ok, setOk] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [expanded, setExpanded] = useState(false)
+  const [ledOn, setLedOn] = useState(false)
 
   const online = device.is_online
   const payload = device.latest?.payload ?? {}
   const entries = Object.entries(payload)
 
+  useEffect(() => {
+    if (!ok) return
+    const t = setTimeout(() => setOk(null), 2500)
+    return () => clearTimeout(t)
+  }, [ok])
+
   async function send(payload: Record<string, unknown>, key: string) {
     setSending(key)
     setErr(null)
+    setOk(null)
     try {
       await onCommand(device.device_id, payload)
+      setOk(key)
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Ошибка отправки')
     } finally {
@@ -46,6 +65,17 @@ export function DeviceCard({
     } catch {
       setErr('Невалидный JSON')
     }
+  }
+
+  function toggleLed() {
+    const next = !ledOn
+    setLedOn(next)
+    void send({ action: 'led', value: next }, 'led')
+  }
+
+  function reboot() {
+    if (!window.confirm(`Перезагрузить ${device.device_id}?`)) return
+    void send({ action: 'reboot' }, 'reboot')
   }
 
   return (
@@ -69,7 +99,6 @@ export function DeviceCard({
       </CardHeader>
 
       <CardContent className="flex flex-1 flex-col gap-4">
-        {/* Телеметрия */}
         <div className="rounded-lg border border-border bg-muted/40 p-3">
           <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
             <Gauge className="size-3.5" />
@@ -102,32 +131,49 @@ export function DeviceCard({
           )}
         </div>
 
-        {/* Быстрые команды */}
         <div className="flex flex-wrap gap-2">
           <Button
             size="sm"
-            variant="secondary"
-            disabled={sending !== null}
-            onClick={() => send({ relay: 1, state: 'on' }, 'on')}
+            variant={ledOn ? 'default' : 'secondary'}
+            disabled={!online || sending !== null}
+            onClick={toggleLed}
           >
-            <Power className="size-3.5" />
-            Реле ON
+            <Lightbulb className="size-3.5" />
+            {sending === 'led' ? '…' : ledOn ? 'LED выкл' : 'LED вкл'}
           </Button>
           <Button
             size="sm"
             variant="outline"
-            disabled={sending !== null}
-            onClick={() => send({ relay: 1, state: 'off' }, 'off')}
+            disabled={!online || sending !== null}
+            onClick={reboot}
           >
-            <Power className="size-3.5" />
-            Реле OFF
+            <RotateCw className={`size-3.5 ${sending === 'reboot' ? 'animate-spin' : ''}`} />
+            {sending === 'reboot' ? '…' : 'Перезагрузка'}
           </Button>
         </div>
 
-        {/* Произвольная команда */}
+        {(ok || err) && (
+          <div
+            role="status"
+            className={
+              ok
+                ? 'flex items-center gap-1.5 rounded-md bg-emerald-500/10 px-3 py-2 text-xs text-emerald-600 dark:text-emerald-400'
+                : 'rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive'
+            }
+          >
+            {ok && (
+              <>
+                <Check className="size-3.5 shrink-0" />
+                Команда отправлена
+              </>
+            )}
+            {err && err}
+          </div>
+        )}
+
         <div className="mt-auto flex flex-col gap-2">
           <label className="text-xs font-medium text-muted-foreground">
-            Команда (JSON) → esp32/{device.device_id}/cmd
+            Команда (JSON) → devices/{device.device_id}/command
           </label>
           <div className="flex gap-2">
             <Input
@@ -138,7 +184,7 @@ export function DeviceCard({
             />
             <Button
               size="sm"
-              disabled={sending !== null}
+              disabled={!online || sending !== null}
               onClick={sendCustom}
               className="shrink-0"
             >
@@ -146,7 +192,6 @@ export function DeviceCard({
               {sending === 'custom' ? '…' : 'Отпр.'}
             </Button>
           </div>
-          {err && <p className="text-xs text-destructive">{err}</p>}
         </div>
       </CardContent>
     </Card>
