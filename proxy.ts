@@ -13,7 +13,7 @@ const PUBLIC_PATHS = [
   '/api/auth/login',
   '/api/auth/logout',
   '/api/status',
-  '/firmware',
+  '/api/firmware',
 ]
 
 export default async function proxy(request: NextRequest) {

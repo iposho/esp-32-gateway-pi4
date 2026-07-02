@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
     // Если Next.js стоит за reverse proxy, берем хост и протокол оттуда
     const host = req.headers.get('host') || 'localhost:3000'
     const protocol = req.headers.get('x-forwarded-proto') || (host.includes('localhost') ? 'http' : 'https')
-    const url = `${protocol}://${host}/firmware/${filename}`
+    const url = `${protocol}://${host}/api/firmware/${filename}`
 
     // Отправляем команду в MQTT
     const topic = commandTopic(deviceId)
