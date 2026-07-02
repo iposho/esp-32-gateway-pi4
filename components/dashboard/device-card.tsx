@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import {
   Lightbulb,
   RotateCw,
@@ -14,6 +14,7 @@ import {
   Zap,
   Terminal,
   Activity,
+  Upload,
 } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -42,11 +43,17 @@ export function DeviceCard({
   const [isDeleting, setIsDeleting] = useState(false)
   const [imgTimestamp, setImgTimestamp] = useState(Date.now())
   const [imgLoading, setImgLoading] = useState(false)
+  const [isUploading, setIsUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const online = device.is_online
   const payload = device.latest?.payload ?? {}
-  const entries = Object.entries(payload).filter(([k]) => k !== 'last_photo_url')
+  const entries = Object.entries(payload).filter(([k]) => k !== 'last_photo_url' && k !== 'ota' && k !== 'progress')
   const isCamera = payload.camera_ready !== undefined || payload.last_photo_url !== undefined
+  
+  const otaStatus = payload.ota as string | undefined
+  const otaProgress = typeof payload.progress === 'number' ? payload.progress : 0
+  const isOtaActive = otaStatus && otaStatus !== 'failed' && otaStatus !== 'success'
 
   // Обновляем картинку при изменении телеметрии с новой фотографией
   useEffect(() => {
@@ -107,6 +114,37 @@ export function DeviceCard({
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Ошибка удаления')
       setIsDeleting(false)
+    }
+  }
+
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setIsUploading(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('deviceId', device.device_id)
+
+      const res = await fetch('/api/ota', {
+        method: 'POST',
+        body: formData,
+      })
+
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || 'Ошибка загрузки')
+      }
+
+      toast.success('Прошивка отправлена на устройство')
+    } catch (err: any) {
+      toast.error(err.message || 'Ошибка OTA обновления')
+    } finally {
+      setIsUploading(false)
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
     }
   }
 
@@ -240,6 +278,30 @@ export function DeviceCard({
         </div>
       )}
 
+      {/* ── OTA Progress ── */}
+      {otaStatus && (
+        <div className="px-4 pb-3">
+          <div className="rounded-lg border border-border bg-muted/20 p-3">
+            <div className="flex items-center justify-between mb-2 text-[10px] font-semibold uppercase tracking-widest text-primary">
+              <span className="flex items-center gap-1.5">
+                <RefreshCw className={`size-3 ${isOtaActive ? 'animate-spin' : ''}`} />
+                OTA Update
+              </span>
+              <span className="text-muted-foreground">{otaStatus}</span>
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-border">
+              <div 
+                className={`h-full transition-all duration-500 ${otaStatus === 'failed' ? 'bg-destructive' : 'bg-primary'}`} 
+                style={{ width: `${Math.max(0, Math.min(100, otaProgress))}%` }} 
+              />
+            </div>
+            <div className="mt-1.5 text-right text-[10px] font-medium text-muted-foreground">
+              {otaProgress}%
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Telemetry ── */}
       <div className="px-4 pb-3">
         <div className="rounded-lg border border-border bg-muted/20 p-3">
@@ -306,6 +368,22 @@ export function DeviceCard({
             <RotateCw className={`size-3 ${sending === 'reboot' ? 'animate-spin' : ''}`} />
             {sending === 'reboot' ? '…' : 'Ребут'}
           </Button>
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={!online || sending !== null || isUploading}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Upload className={`size-3 ${isUploading ? 'animate-bounce' : ''}`} />
+            {isUploading ? 'OTA...' : 'OTA'}
+          </Button>
+          <input
+            type="file"
+            accept=".bin"
+            className="hidden"
+            ref={fileInputRef}
+            onChange={handleFileUpload}
+          />
           {isBalcony && (
             <>
               <Button

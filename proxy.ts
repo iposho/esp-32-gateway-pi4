@@ -15,7 +15,7 @@ const PUBLIC_PATHS = [
   '/api/status',
 ]
 
-export async function proxy(request: NextRequest) {
+export default async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // Статика и публичные маршруты — пропускаем без проверки
