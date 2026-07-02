@@ -133,6 +133,15 @@ esp32.kuzyak.in {
 
 ---
 
+## 7. Обновление прошивок по воздуху (OTA)
+
+В интерфейсе встроена поддержка OTA-обновлений:
+1. В карточке устройства нажмите кнопку **OTA** и выберите собранный `.bin` файл.
+2. Файл сохраняется на сервере (в `public/firmware/`).
+3. Бэкенд отправляет MQTT-команду устройству со ссылкой на прошивку (`{"action":"ota","url":"..."}`).
+4. Устройство может публиковать прогресс скачивания в телеметрию (`{"ota":"downloading","progress":40}`).
+5. В интерфейсе карточки устройства автоматически появляется прогресс-бар обновления.
+
 ## Структура проекта
 
 ```
@@ -152,5 +161,5 @@ docker-compose.yml       # единый стек
 | Топик | Направление | Payload |
 |-------|-------------|---------|
 | `devices/<id>/status` | ESP32 → | `{"status":"online"}` (retained + LWT) |
-| `devices/<id>/telemetry` | ESP32 → | `{"uptime":123,"rssi":-60,"heap":40000}` |
-| `devices/<id>/command` | → ESP32 | `{"action":"relay","value":true}`<br>`{"action":"push"}` (Отправка в Supabase)<br>`{"action":"sync"}` (NTP-синхронизация) |
+| `devices/<id>/telemetry` | ESP32 → | `{"uptime":123,"rssi":-60,"heap":40000}`<br>`{"ota":"downloading","progress":40}` |
+| `devices/<id>/command` | → ESP32 | `{"action":"relay","value":true}`<br>`{"action":"push"}` (Отправка в Supabase)<br>`{"action":"sync"}` (NTP-синхронизация)<br>`{"action":"ota","url":"http://..."}` |
