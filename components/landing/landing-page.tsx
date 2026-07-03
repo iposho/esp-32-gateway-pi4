@@ -1,5 +1,6 @@
 import Link from 'next/link'
-import { ArrowRight, Cpu, LockKeyhole } from 'lucide-react'
+import { ArrowRight, LockKeyhole } from 'lucide-react'
+import { BrandLogo } from '@/components/brand-logo'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 
@@ -9,9 +10,7 @@ export function LandingPage() {
       <header className="sticky top-0 z-10 border-b border-zinc-200 bg-white/80 backdrop-blur dark:border-zinc-800 dark:bg-black/80">
         <div className="mx-auto flex max-w-4xl items-center justify-between gap-4 px-4 py-4">
           <div className="flex items-center gap-3">
-            <div className="flex size-9 items-center justify-center rounded-md bg-black text-white dark:bg-white dark:text-black shadow-sm">
-              <Cpu className="size-5" />
-            </div>
+            <BrandLogo size={36} className="rounded-md shadow-sm" />
             <div>
               <p className="text-sm font-medium leading-tight">ESP32 Gateway</p>
               <p className="text-xs text-zinc-500 dark:text-zinc-400">esp32.kuzyak.in</p>

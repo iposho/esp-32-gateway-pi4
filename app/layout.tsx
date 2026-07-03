@@ -13,7 +13,6 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: 'ESP32 Gateway',
   description: 'Панель управления ESP32-устройствами через MQTT',
-  generator: 'v0.app',
   icons: {
     icon: [
       {
@@ -30,14 +29,15 @@ export const metadata: Metadata = {
       },
     ],
     apple: '/apple-icon.png',
+    shortcut: '/favicon.ico',
   },
 }
 
 export const viewport: Viewport = {
   colorScheme: 'light dark',
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: 'white' },
-    { media: '(prefers-color-scheme: dark)', color: 'black' },
+    { media: '(prefers-color-scheme: light)', color: '#f8fafc' },
+    { media: '(prefers-color-scheme: dark)', color: '#0f1b2e' },
   ],
 }
 

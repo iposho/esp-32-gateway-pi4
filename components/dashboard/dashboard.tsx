@@ -4,7 +4,6 @@ import { useCallback } from 'react'
 import useSWR from 'swr'
 import { useRouter } from 'next/navigation'
 import {
-  Cpu,
   LogOut,
   RefreshCw,
   Radio,
@@ -12,6 +11,7 @@ import {
   WifiOff,
   Activity,
 } from 'lucide-react'
+import { BrandLogo } from '@/components/brand-logo'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { DeviceCard } from './device-card'
@@ -79,9 +79,7 @@ export function Dashboard() {
       <header className="sticky top-0 z-10 border-b border-white/10 bg-background/70 backdrop-blur-2xl supports-[backdrop-filter]:bg-background/55">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
           <div className="flex items-center gap-3">
-            <div className="flex size-9 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/20">
-              <Cpu className="size-4" />
-            </div>
+            <BrandLogo size={36} />
             <div>
               <h1 className="text-base font-semibold leading-tight text-foreground">ESP32 Gateway</h1>
               <p className="text-xs text-muted-foreground">esp32.kuzyak.in</p>
