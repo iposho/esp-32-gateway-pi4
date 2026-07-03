@@ -341,46 +341,41 @@ export function DeviceCard({
       {/* ── Camera section ── */}
       {isCamera && (
         <div className="px-4 pb-3 sm:px-5">
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-              <Camera className="size-3" />
-              Камера
-            </div>
-            <Badge
-              variant="outline"
-              className={`h-6 px-2 text-[10px] ${
-                hasCameraSignal
-                  ? 'border-primary/25 bg-primary/10 text-primary'
-                  : 'border-border text-muted-foreground'
-              }`}
-            >
-              {hasCameraSignal ? <Camera className="size-2.5" /> : <CameraOff className="size-2.5" />}
-              {cameraStatusLabel}
-            </Badge>
-          </div>
           <div className="overflow-hidden rounded-2xl border border-border bg-muted/25">
-            {!online && !payload.last_photo_url ? (
-              /* ── Offline camera placeholder ── */
-              <div className="flex aspect-video flex-col items-center justify-center gap-2 bg-muted/40 text-muted-foreground/60">
-                <CameraOff className="size-8 opacity-40" />
-                <span className="text-xs">Камера офлайн</span>
-              </div>
-            ) : payload.last_photo_url ? (
-              <div className="relative flex aspect-video items-center justify-center bg-black/5 dark:bg-black/20">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={`/api/devices/${device.device_id}/camera?t=${imgTimestamp}`}
-                  alt="Camera snapshot"
-                  className={`w-full h-full object-contain transition-opacity duration-300 ${imgLoading ? 'opacity-50' : 'opacity-100'}`}
-                  onLoad={() => setImgLoading(false)}
-                  onError={() => setImgLoading(false)}
-                />
-              </div>
-            ) : (
-              <div className="flex aspect-video items-center justify-center text-sm text-muted-foreground">
-                Нет снимка
-              </div>
-            )}
+            <div className="relative">
+              <Badge
+                variant="outline"
+                className={`absolute left-2 top-2 z-10 h-6 border px-2 text-[10px] shadow-sm backdrop-blur-sm ${
+                  hasCameraSignal
+                    ? 'border-primary/30 bg-primary/20 text-primary'
+                    : 'border-border/80 bg-background/75 text-muted-foreground'
+                }`}
+              >
+                {hasCameraSignal ? <Camera className="size-2.5" /> : <CameraOff className="size-2.5" />}
+                {cameraStatusLabel}
+              </Badge>
+              {!online && !payload.last_photo_url ? (
+                <div className="flex aspect-video flex-col items-center justify-center gap-2 bg-muted/40 text-muted-foreground/60">
+                  <CameraOff className="size-8 opacity-40" />
+                  <span className="text-xs">Камера офлайн</span>
+                </div>
+              ) : payload.last_photo_url ? (
+                <div className="flex aspect-video items-center justify-center bg-black/5 dark:bg-black/20">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={`/api/devices/${device.device_id}/camera?t=${imgTimestamp}`}
+                    alt="Camera snapshot"
+                    className={`h-full w-full object-contain transition-opacity duration-300 ${imgLoading ? 'opacity-50' : 'opacity-100'}`}
+                    onLoad={() => setImgLoading(false)}
+                    onError={() => setImgLoading(false)}
+                  />
+                </div>
+              ) : (
+                <div className="flex aspect-video items-center justify-center text-sm text-muted-foreground">
+                  Нет снимка
+                </div>
+              )}
+            </div>
             {online && (
               <div className="flex items-center gap-2 border-t border-border bg-background/45 p-2">
                 <Button

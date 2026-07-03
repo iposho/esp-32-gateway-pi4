@@ -1,20 +1,41 @@
-# v0 sandbox internal files
+# ── Dependencies ──────────────────────────────────────────────
+node_modules/
+
+# ── Next.js / build ───────────────────────────────────────────
+.next/
+out/
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# ── Environment & secrets ─────────────────────────────────────
+.env
+.env*.local
+.env.mqtt-users
+mosquitto/config/passwd
+
+# ── Runtime data (генерируется на Pi / в Docker) ─────────────
+node-red/data/
+public/firmware/
+
+# ── Logs & caches ─────────────────────────────────────────────
+*.log
+npm-debug.log*
+pnpm-debug.log*
+.eslintcache
+
+# ── OS & editors ──────────────────────────────────────────────
+.DS_Store
+.history/
+.idea/
+.vscode/
+.claude/settings.local.json
+
+# ── Deploy ────────────────────────────────────────────────────
+.vercel/
+
+# ── v0 sandbox (legacy) ───────────────────────────────────────
 __v0_runtime_loader.js
 __v0_devtools.tsx
 __v0_jsx-dev-runtime.ts
 .snowflake/
 .v0-trash/
-.vercel/
-
-# Environment variables
-.env
-.env*.local
-.env.mqtt-users
-node-red/data/
-mosquitto/config/passwd
-
-# Common ignores
-node_modules
-.next/
-.DS_Store
-.history/
