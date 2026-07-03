@@ -308,7 +308,7 @@ export function DeviceCard({
       {isCamera && (
         <div className="px-4 pb-3 sm:px-5">
           <div className="overflow-hidden rounded-2xl border border-border bg-muted/25">
-            {!online ? (
+            {!online && !payload.last_photo_url ? (
               /* ── Offline camera placeholder ── */
               <div className="flex aspect-video flex-col items-center justify-center gap-2 bg-muted/40 text-muted-foreground/60">
                 <CameraOff className="size-8 opacity-40" />

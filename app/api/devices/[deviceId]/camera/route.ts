@@ -19,14 +19,16 @@ export async function GET(
     return new NextResponse('Internal Server Error', { status: 503 })
   }
 
-  // Получаем последнюю телеметрию для этого устройства, чтобы узнать локальный IP-адрес
+  // Берём последнюю телеметрию, где есть URL снимка (обычная телеметрия его не содержит)
   const { data: tele, error } = await supabase
     .from('telemetry')
     .select('*')
     .eq('device_id', deviceId)
+    .not('payload->>last_photo_url', 'is', null)
+    .neq('payload->>last_photo_url', '')
     .order('created_at', { ascending: false })
     .limit(1)
-    .single()
+    .maybeSingle()
 
   if (error || !tele) {
     console.error(`[Camera Proxy] Telemetry not found for ${deviceId}:`, error?.message)
