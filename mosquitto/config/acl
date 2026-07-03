@@ -15,6 +15,12 @@ topic read devices/+/command
 user backend
 topic readwrite devices/#
 
+# --- Резервный Telegram bridge ---
+user telegram
+topic read devices/+/status
+topic read devices/+/telemetry
+topic write devices/+/command
+
 # --- Пользователь для отладки (только чтение) ---
 user viewer
 topic read devices/#

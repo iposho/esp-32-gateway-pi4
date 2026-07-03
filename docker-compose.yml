@@ -3,6 +3,7 @@
 #   admin      — Next.js админка (esp32.kuzyak.in)
 #   mosquitto  — MQTT-брокер
 #   nodered    — приём MQTT -> запись в self-hosted Supabase
+#   telegram-bot — резервное управление через Telegram -> MQTT
 #
 # Supabase НЕ входит в этот стек — подключаемся к уже
 # работающему на Pi Supabase через внешнюю docker-сеть.
@@ -76,6 +77,29 @@ services:
     networks:
       - esp32-internal
       - supabase
+
+  telegram-bot:
+    build:
+      context: .
+      dockerfile: telegram-bot/Dockerfile
+    container_name: esp32-telegram-bot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_ALLOWED_CHAT_IDS: ${TELEGRAM_ALLOWED_CHAT_IDS:-}
+      TELEGRAM_DEVICE_MAP: ${TELEGRAM_DEVICE_MAP:-balcony:esp32-balcony,flat:esp32-flat,cam:esp32-cam}
+      TELEGRAM_DEFAULT_DEVICE: ${TELEGRAM_DEFAULT_DEVICE:-balcony}
+      TELEGRAM_POLL_TIMEOUT: ${TELEGRAM_POLL_TIMEOUT:-30}
+      # Через сколько секунд тишины считать online-устройство пропавшим (0 — выключить)
+      TELEGRAM_OFFLINE_TIMEOUT: ${TELEGRAM_OFFLINE_TIMEOUT:-120}
+      MQTT_URL: mqtt://mosquitto:1883
+      MQTT_USERNAME: ${TELEGRAM_MQTT_USERNAME:-telegram}
+      MQTT_PASSWORD: ${TELEGRAM_MQTT_PASSWORD:-}
+    depends_on:
+      - mosquitto
+    networks:
+      - esp32-internal
 
 volumes:
   mosquitto-data:
