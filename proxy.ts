@@ -1,4 +1,9 @@
 import { type NextRequest, NextResponse } from 'next/server'
+import {
+  cameraCorsHeaders,
+  isCameraRoute,
+  isValidCameraToken,
+} from '@/lib/camera-auth'
 import { updateSession } from '@/lib/supabase/middleware'
 
 /**
@@ -27,6 +32,14 @@ export default async function proxy(request: NextRequest) {
     pathname.startsWith('/apple-icon') ||
     PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/'))
   ) {
+    return NextResponse.next()
+  }
+
+  // Камера с валидным токеном — для встраивания с других сайтов
+  if (isCameraRoute(pathname) && isValidCameraToken(request)) {
+    if (request.method === 'OPTIONS') {
+      return new NextResponse(null, { status: 204, headers: cameraCorsHeaders })
+    }
     return NextResponse.next()
   }
 

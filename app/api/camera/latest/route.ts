@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server'
+import { cameraCorsHeaders } from '@/lib/camera-auth'
 import { getServiceClient } from '@/lib/supabase/server'
 import type { Telemetry } from '@/lib/types'
+
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: cameraCorsHeaders })
+}
 
 export const dynamic = 'force-dynamic'
 
@@ -53,6 +58,7 @@ export async function GET() {
     return new NextResponse(imageBuffer, {
       status: 200,
       headers: {
+        ...cameraCorsHeaders,
         'Content-Type': 'image/jpeg',
         'Cache-Control': 'no-store, max-age=0',
         'X-Device-Id': t.device_id,
