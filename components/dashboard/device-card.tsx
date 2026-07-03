@@ -18,6 +18,11 @@ import {
   Cpu,
   FolderOpen,
   WifiOff,
+  Globe,
+  Wifi,
+  Signal,
+  Clock,
+  MemoryStick,
 } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -60,6 +65,28 @@ const OTA_LABELS: Record<string, string> = {
   failed: 'OTA: ошибка',
 }
 
+const QUICK_STATUS_FIELDS = [
+  { keys: ['ip'], label: 'IP', icon: Globe },
+  { keys: ['wifi_ssid', 'ssid'], label: 'Wi-Fi', icon: Wifi },
+  { keys: ['rssi', 'wifi_rssi'], label: 'Сигнал', icon: Signal },
+  { keys: ['uptime', 'uptime_s', 'uptime_sec'], label: 'Аптайм', icon: Clock },
+  { keys: ['free_heap', 'heap'], label: 'RAM', icon: MemoryStick },
+  { keys: ['fw_version', 'sdk_version'], label: 'Прошивка', icon: Cpu },
+] as const
+
+const QUICK_STATUS_KEY_SET = new Set(
+  QUICK_STATUS_FIELDS.flatMap((f) => f.keys.map((k) => k.toLowerCase())),
+)
+
+function getPayloadValue(payload: Record<string, unknown>, keys: readonly string[]) {
+  for (const key of keys) {
+    if (payload[key] !== undefined && payload[key] !== null) return { value: payload[key], key }
+    const found = Object.entries(payload).find(([k]) => k.toLowerCase() === key.toLowerCase())
+    if (found) return { value: found[1], key: found[0] }
+  }
+  return null
+}
+
 export function DeviceCard({
   device,
   onCommand,
@@ -71,7 +98,8 @@ export function DeviceCard({
 }) {
   const [custom, setCustom] = useState('{ "action": "led", "value": true }')
   const [sending, setSending] = useState<string | null>(null)
-  const [expanded, setExpanded] = useState(false)
+  const [telemetryOpen, setTelemetryOpen] = useState(false)
+  const [telemetryExpanded, setTelemetryExpanded] = useState(false)
   const [ledOn, setLedOn] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [imgTimestamp, setImgTimestamp] = useState(Date.now())
@@ -83,7 +111,9 @@ export function DeviceCard({
 
   const online = device.is_online
   const payload = device.latest?.payload ?? {}
-  const entries = Object.entries(payload).filter(([k]) => !isServiceTelemetryKey(k))
+  const detailEntries = Object.entries(payload).filter(
+    ([k]) => !isServiceTelemetryKey(k) && !QUICK_STATUS_KEY_SET.has(k.toLowerCase()),
+  )
   const isCamera = payload.camera_ready !== undefined || payload.last_photo_url !== undefined
   
   const otaStatus = payload.ota as string | undefined
@@ -214,7 +244,7 @@ export function DeviceCard({
       />
 
       {/* ── Header ── */}
-      <div className="flex items-start justify-between gap-3 p-4 pb-3 sm:p-5 sm:pb-4">
+      <div className="flex items-start justify-between gap-3 p-4 pb-2 sm:p-5 sm:pb-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2.5">
             <div
@@ -227,14 +257,8 @@ export function DeviceCard({
               <Activity className="size-4" />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="flex min-w-0 items-center gap-2">
-                <h3 className="truncate text-base font-semibold tracking-tight text-foreground">{device.name}</h3>
-              </div>
-              <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-                <span className="truncate font-mono opacity-70">{device.device_id}</span>
-                <span className="text-border">·</span>
-                <span className="shrink-0 tabular-nums">{timeAgo(device.last_seen)}</span>
-              </div>
+              <h3 className="truncate text-base font-semibold tracking-tight text-foreground">{device.name}</h3>
+              <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground/70">{device.device_id}</p>
             </div>
           </div>
         </div>
@@ -251,62 +275,89 @@ export function DeviceCard({
         )}
       </div>
 
+      {/* ── Quick status (одинаковый для всех плат) ── */}
       <div className="px-4 pb-3 sm:px-5">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge
-            variant={online ? 'online' : 'outline'}
-            className={`h-7 px-2.5 text-xs ${online ? '' : 'border-border text-muted-foreground'}`}
-          >
-            {online ? (
-              <>
-                <span className="relative flex size-1.5">
-                  <span className="absolute inline-flex size-full animate-ping rounded-full bg-current opacity-40" />
-                  <span className="relative inline-flex size-1.5 rounded-full bg-current" />
-                </span>
-                Онлайн
-              </>
-            ) : (
-              <>
-                <WifiOff className="size-3" />
-                Оффлайн
-              </>
+        <div className="rounded-2xl border border-border bg-background/35 p-3">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <Badge
+              variant={online ? 'online' : 'outline'}
+              className={`h-7 px-2.5 text-xs ${online ? '' : 'border-border text-muted-foreground'}`}
+            >
+              {online ? (
+                <>
+                  <span className="relative flex size-1.5">
+                    <span className="absolute inline-flex size-full animate-ping rounded-full bg-current opacity-40" />
+                    <span className="relative inline-flex size-1.5 rounded-full bg-current" />
+                  </span>
+                  Онлайн
+                </>
+              ) : (
+                <>
+                  <WifiOff className="size-3" />
+                  Оффлайн
+                </>
+              )}
+            </Badge>
+            <span className="text-xs text-muted-foreground tabular-nums">{timeAgo(device.last_seen)}</span>
+            {otaLabel && (
+              <Badge
+                variant="outline"
+                className={`h-7 px-2.5 text-xs ${
+                  otaStatus === 'failed'
+                    ? 'border-destructive/25 bg-destructive/10 text-destructive'
+                    : 'border-primary/25 bg-primary/10 text-primary'
+                }`}
+              >
+                <RefreshCw className={`size-3 ${isOtaActive ? 'animate-spin' : ''}`} />
+                {otaLabel}
+                {isOtaActive ? ` ${Math.round(otaProgress)}%` : ''}
+              </Badge>
             )}
-          </Badge>
-
-          {isCamera && (
-            <Badge
-              variant="outline"
-              className={`h-7 px-2.5 text-xs ${
-                hasCameraSignal
-                  ? 'border-primary/25 bg-primary/10 text-primary'
-                  : 'border-border text-muted-foreground'
-              }`}
-            >
-              {hasCameraSignal ? <Camera className="size-3" /> : <CameraOff className="size-3" />}
-              {cameraStatusLabel}
-            </Badge>
-          )}
-
-          {otaLabel && (
-            <Badge
-              variant="outline"
-              className={`h-7 px-2.5 text-xs ${
-                otaStatus === 'failed'
-                  ? 'border-destructive/25 bg-destructive/10 text-destructive'
-                  : 'border-primary/25 bg-primary/10 text-primary'
-              }`}
-            >
-              <RefreshCw className={`size-3 ${isOtaActive ? 'animate-spin' : ''}`} />
-              {otaLabel}
-              {isOtaActive ? ` ${Math.round(otaProgress)}%` : ''}
-            </Badge>
-          )}
+          </div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 sm:grid-cols-3">
+            {QUICK_STATUS_FIELDS.map(({ keys, label, icon: Icon }) => {
+              const found = getPayloadValue(payload, keys)
+              return (
+                <div key={keys[0]} className="min-w-0">
+                  <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
+                    <Icon className="size-2.5 shrink-0" />
+                    {label}
+                  </div>
+                  <p
+                    className={`mt-0.5 truncate font-mono text-sm tabular-nums ${
+                      found ? 'font-medium text-foreground' : 'text-muted-foreground/40'
+                    }`}
+                    title={found ? formatValue(found.value, found.key) : undefined}
+                  >
+                    {found ? formatValue(found.value, found.key) : '—'}
+                  </p>
+                </div>
+              )
+            })}
+          </div>
         </div>
       </div>
 
       {/* ── Camera section ── */}
       {isCamera && (
         <div className="px-4 pb-3 sm:px-5">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+              <Camera className="size-3" />
+              Камера
+            </div>
+            <Badge
+              variant="outline"
+              className={`h-6 px-2 text-[10px] ${
+                hasCameraSignal
+                  ? 'border-primary/25 bg-primary/10 text-primary'
+                  : 'border-border text-muted-foreground'
+              }`}
+            >
+              {hasCameraSignal ? <Camera className="size-2.5" /> : <CameraOff className="size-2.5" />}
+              {cameraStatusLabel}
+            </Badge>
+          </div>
           <div className="overflow-hidden rounded-2xl border border-border bg-muted/25">
             {!online && !payload.last_photo_url ? (
               /* ── Offline camera placeholder ── */
@@ -358,6 +409,67 @@ export function DeviceCard({
         </div>
       )}
 
+      {/* ── Telemetry (сворачиваемая) ── */}
+      {detailEntries.length > 0 && (
+        <div className="px-4 pb-3 sm:px-5">
+          <div className="rounded-2xl border border-border bg-background/35">
+            <button
+              type="button"
+              onClick={() => setTelemetryOpen((s) => !s)}
+              className="flex w-full items-center justify-between gap-2 p-3 text-left transition-colors hover:bg-muted/20"
+            >
+              <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                <Gauge className="size-3" />
+                Телеметрия
+                <span className="font-normal normal-case tracking-normal text-muted-foreground/60">
+                  · {detailEntries.length}
+                </span>
+              </div>
+              <ChevronDown
+                className={`size-4 shrink-0 text-muted-foreground transition-transform duration-200 ${
+                  telemetryOpen ? 'rotate-180' : ''
+                }`}
+              />
+            </button>
+            {telemetryOpen && (
+              <div className="border-t border-border/50 px-3 pb-3">
+                <div className="space-y-0">
+                  {detailEntries
+                    .slice(0, telemetryExpanded ? detailEntries.length : 6)
+                    .map(([k, v], i) => (
+                      <div
+                        key={k}
+                        className={`flex items-center justify-between gap-3 py-2 ${
+                          i > 0 ? 'border-t border-border/50' : ''
+                        }`}
+                      >
+                        <span className="min-w-0 truncate text-sm text-muted-foreground">{labelForKey(k)}</span>
+                        <span className="shrink-0 text-right font-mono text-sm font-medium tabular-nums text-foreground">
+                          {formatValue(v, k)}
+                        </span>
+                      </div>
+                    ))}
+                </div>
+                {detailEntries.length > 6 && (
+                  <button
+                    type="button"
+                    onClick={() => setTelemetryExpanded((s) => !s)}
+                    className="mt-1 flex min-h-8 items-center gap-1 text-xs font-medium text-primary/75 transition-colors hover:text-primary"
+                  >
+                    <ChevronDown
+                      className={`size-3 transition-transform duration-200 ${
+                        telemetryExpanded ? 'rotate-180' : ''
+                      }`}
+                    />
+                    {telemetryExpanded ? 'Свернуть' : `Ещё ${detailEntries.length - 6}`}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── OTA Progress ── */}
       {otaStatus && (
         <div className="px-4 pb-3 sm:px-5">
@@ -381,46 +493,6 @@ export function DeviceCard({
           </div>
         </div>
       )}
-
-      {/* ── Telemetry ── */}
-      <div className="px-4 pb-3 sm:px-5">
-        <div className="rounded-2xl border border-border bg-background/35 p-3">
-          <div className="mb-2.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-            <Gauge className="size-3" />
-            Телеметрия
-          </div>
-          {entries.length === 0 ? (
-            <p className="text-xs text-muted-foreground/60 py-1">Нет данных</p>
-          ) : (
-            <div className="space-y-0">
-              {entries.slice(0, expanded ? entries.length : 4).map(([k, v], i) => (
-                <div
-                  key={k}
-                  className={`flex items-center justify-between gap-3 py-2 ${
-                    i > 0 ? 'border-t border-border/50' : ''
-                  }`}
-                >
-                  <span className="min-w-0 truncate text-sm text-muted-foreground">{labelForKey(k)}</span>
-                  <span className="shrink-0 text-right font-mono text-sm font-medium tabular-nums text-foreground">
-                    {formatValue(v, k)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-          {entries.length > 4 && (
-            <button
-              onClick={() => setExpanded((s) => !s)}
-              className="mt-2 flex min-h-9 items-center gap-1 text-xs font-medium text-primary/75 transition-colors hover:text-primary"
-            >
-              <ChevronDown
-                className={`size-3 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}
-              />
-              {expanded ? 'Свернуть' : `Ещё ${entries.length - 4}`}
-            </button>
-          )}
-        </div>
-      </div>
 
       {/* ── Actions ── */}
       <div className="px-4 pb-4 sm:px-5">
