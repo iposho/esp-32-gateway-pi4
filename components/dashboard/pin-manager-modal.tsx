@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { X, Save, Eye, Zap, Terminal } from 'lucide-react'
+import { X, Save, Eye, Zap, Terminal, RadioReceiver } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card } from '@/components/ui/card'
@@ -87,45 +87,54 @@ export function PinManagerModal({
   const formatTime = (d: Date) => d.toLocaleTimeString('ru-RU', { hour12: false, hour: '2-digit', minute:'2-digit', second:'2-digit' })
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-      <Card className="w-full max-w-md overflow-hidden flex flex-col border-border/50 shadow-2xl">
-        <div className="flex items-center justify-between p-4 border-b border-border bg-muted/30">
-          <h3 className="font-semibold flex items-center gap-2 text-foreground">
-            <Zap className="size-4 text-emerald-500" />
-            Управление пинами (GPIO)
-          </h3>
-          <Button variant="ghost" size="icon-xs" onClick={onClose} disabled={isSending}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-3 backdrop-blur-xl sm:p-6">
+      <Card className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden border-white/10 bg-card/90 shadow-2xl">
+        <div className="shrink-0 border-b border-border bg-background/35 px-4 py-4 sm:px-5">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                <Zap className="size-5" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold tracking-tight text-foreground">GPIO</h3>
+                <p className="mt-0.5 text-sm text-muted-foreground">Быстрые команды и журнал ответов устройства</p>
+              </div>
+            </div>
+            <Button variant="ghost" size="icon-sm" onClick={onClose} disabled={isSending} title="Закрыть">
             <X className="size-4" />
           </Button>
+          </div>
         </div>
 
-        <div className="p-4 space-y-4">
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Пин (GPIO)</label>
+        <div className="grid min-h-0 flex-1 gap-4 p-4 sm:grid-cols-[1fr_1.1fr] sm:p-5">
+          <div className="space-y-4">
+          <div className="space-y-2">
+            <label className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Пин GPIO</label>
             <Input 
               type="number" 
               placeholder="Например: 2, 4, 32" 
               value={pin} 
               onChange={e => setPin(e.target.value)} 
               disabled={isSending}
+              className="h-11 rounded-xl bg-background/65"
             />
           </div>
 
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Действие</label>
-            <div className="flex gap-1.5 bg-muted/50 p-1 rounded-md border border-border/50">
+          <div className="space-y-2">
+            <label className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Действие</label>
+            <div className="grid grid-cols-3 gap-1 rounded-2xl border border-border bg-background/45 p-1">
               <button 
-                className={`flex-1 text-xs py-1.5 rounded-sm transition-all duration-200 ${action === 'read' ? 'bg-background shadow-sm font-medium text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                className={`min-h-10 rounded-xl text-sm transition-all duration-200 ${action === 'read' ? 'bg-card shadow-sm font-medium text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
                 onClick={() => setAction('read')}
                 disabled={isSending}
               >Чтение</button>
               <button 
-                className={`flex-1 text-xs py-1.5 rounded-sm transition-all duration-200 ${action === 'write' ? 'bg-background shadow-sm font-medium text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                className={`min-h-10 rounded-xl text-sm transition-all duration-200 ${action === 'write' ? 'bg-card shadow-sm font-medium text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
                 onClick={() => setAction('write')}
                 disabled={isSending}
               >Запись</button>
               <button 
-                className={`flex-1 text-xs py-1.5 rounded-sm transition-all duration-200 ${action === 'mode' ? 'bg-background shadow-sm font-medium text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                className={`min-h-10 rounded-xl text-sm transition-all duration-200 ${action === 'mode' ? 'bg-card shadow-sm font-medium text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
                 onClick={() => setAction('mode')}
                 disabled={isSending}
               >Режим</button>
@@ -133,10 +142,10 @@ export function PinManagerModal({
           </div>
 
           {action === 'mode' && (
-            <div className="space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
-              <label className="text-xs font-medium text-muted-foreground">Режим пина</label>
+            <div className="animate-in fade-in slide-in-from-top-1 space-y-2 duration-200">
+              <label className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Режим пина</label>
               <select 
-                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex h-11 w-full rounded-xl border border-input bg-background/65 px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                 value={mode}
                 onChange={e => setMode(e.target.value as any)}
                 disabled={isSending}
@@ -149,31 +158,46 @@ export function PinManagerModal({
           )}
 
           {action === 'write' && (
-            <div className="space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
-              <label className="text-xs font-medium text-muted-foreground">Значение (0 = LOW, 1 = HIGH, 0-255 = PWM)</label>
+            <div className="animate-in fade-in slide-in-from-top-1 space-y-2 duration-200">
+              <label className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Значение</label>
               <Input 
                 type="number" 
                 placeholder="0, 1 или 0-255" 
                 value={writeVal} 
                 onChange={e => setWriteVal(e.target.value)} 
                 disabled={isSending}
+                className="h-11 rounded-xl bg-background/65"
               />
+              <p className="text-xs leading-5 text-muted-foreground">0 = LOW, 1 = HIGH, 0-255 = PWM.</p>
             </div>
           )}
-        </div>
 
-        {/* Console / Log area */}
-        <div className="border-t border-border bg-black/90 p-3 h-40 flex flex-col">
-          <div className="flex items-center gap-1.5 mb-2 text-[10px] font-semibold text-zinc-500 uppercase tracking-widest shrink-0">
-            <Terminal className="size-3" />
-            Терминал команд
+          <div className="rounded-2xl border border-border bg-background/35 p-3">
+            <div className="mb-1 flex items-center gap-2 text-sm font-medium text-foreground">
+              <RadioReceiver className="size-4 text-primary" />
+              Payload
+            </div>
+            <code className="block break-all rounded-xl bg-muted/70 p-3 font-mono text-xs leading-5 text-muted-foreground">
+              {action === 'mode'
+                ? JSON.stringify({ action: 'pin_mode', pin: pin ? Number(pin) : 0, mode })
+                : action === 'write'
+                  ? JSON.stringify({ action: 'pin_write', pin: pin ? Number(pin) : 0, value: Number(writeVal) })
+                  : JSON.stringify({ action: 'pin_read', pin: pin ? Number(pin) : 0 })}
+            </code>
+          </div>
+          </div>
+
+        <div className="flex min-h-[16rem] flex-col overflow-hidden rounded-2xl border border-border bg-black/80 p-3">
+          <div className="mb-2 flex shrink-0 items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
+            <Terminal className="size-3.5" />
+            Журнал
           </div>
           <div 
             ref={scrollRef}
-            className="flex-1 overflow-y-auto space-y-1 font-mono text-[11px]"
+            className="flex-1 space-y-1 overflow-y-auto font-mono text-xs"
           >
             {logs.length === 0 ? (
-              <div className="text-zinc-600 italic">Ожидание команд...</div>
+              <div className="flex h-full items-center justify-center text-zinc-600">Ожидание команд...</div>
             ) : (
               logs.map((log) => (
                 <div key={log.id} className="flex gap-2">
@@ -190,12 +214,13 @@ export function PinManagerModal({
             )}
           </div>
         </div>
+        </div>
 
-        <div className="p-4 border-t border-border bg-muted/10 flex justify-end gap-2">
-          <Button variant="ghost" size="sm" onClick={onClose} disabled={isSending}>Закрыть</Button>
-          <Button size="sm" onClick={handleSend} disabled={!pin || isSending}>
+        <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-border bg-background/35 p-4 sm:flex-row sm:justify-end sm:px-5">
+          <Button variant="ghost" size="sm" onClick={onClose} disabled={isSending} className="h-10">Закрыть</Button>
+          <Button size="sm" onClick={handleSend} disabled={!pin || isSending} className="h-10">
             {isSending ? 'Отправка...' : (
-              action === 'read' ? <><Eye className="size-3 mr-1.5"/>Прочитать</> : <><Save className="size-3 mr-1.5"/>Отправить</>
+              action === 'read' ? <><Eye className="size-4"/>Прочитать</> : <><Save className="size-4"/>Отправить</>
             )}
           </Button>
         </div>

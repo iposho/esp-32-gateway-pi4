@@ -15,17 +15,29 @@ export function timeAgo(iso: string | null): string {
 /* ── Human-readable telemetry key labels ── */
 
 const KEY_LABELS: Record<string, string> = {
-  uptime: 'Аптайм',
-  rssi: 'Wi-Fi сигнал',
-  heap: 'Свободная память',
-  free_heap: 'Свободная память',
+  uptime: 'Время работы',
+  uptime_s: 'Время работы',
+  uptime_sec: 'Время работы',
+  rssi: 'Сигнал Wi-Fi',
+  wifi_rssi: 'Сигнал Wi-Fi',
+  heap: 'Свободная RAM',
+  free_heap: 'Свободная RAM',
+  memory_free: 'Свободная память',
   temp: 'Температура',
   temperature: 'Температура',
+  temperature_c: 'Температура',
   humidity: 'Влажность',
+  humidity_pct: 'Влажность',
   pressure: 'Давление',
+  pressure_hpa: 'Давление',
   voltage: 'Напряжение',
+  vcc: 'Питание',
+  battery_voltage: 'Напряжение батареи',
   battery: 'Батарея',
+  battery_pct: 'Заряд батареи',
+  battery_percent: 'Заряд батареи',
   lux: 'Освещённость',
+  light: 'Освещённость',
   wifi_ssid: 'Wi-Fi сеть',
   ip: 'IP-адрес',
   camera_ready: 'Камера',
@@ -34,14 +46,37 @@ const KEY_LABELS: Record<string, string> = {
   sdk_version: 'SDK',
   mac: 'MAC-адрес',
   interval: 'Интервал',
+  interval_s: 'Интервал отправки',
+  relay: 'Реле',
+  led: 'LED',
+  button: 'Кнопка',
+  motion: 'Движение',
+  co2: 'CO2',
+  pm25: 'PM2.5',
+  pm10: 'PM10',
+  soil: 'Влажность почвы',
+  soil_moisture: 'Влажность почвы',
 }
+
+const ACRONYMS = new Set(['ip', 'mac', 'rssi', 'ssid', 'sdk', 'ota', 'co2', 'pm25', 'pm10'])
 
 /**
  * Returns a human-readable label for a telemetry key.
  * Falls back to the raw key if no label is defined.
  */
 export function labelForKey(key: string): string {
-  return KEY_LABELS[key] ?? key
+  const normalized = key.toLowerCase()
+  if (KEY_LABELS[normalized]) return KEY_LABELS[normalized]
+
+  return normalized
+    .replace(/_pct$/, '_percent')
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => {
+      if (ACRONYMS.has(part)) return part.toUpperCase()
+      return part.charAt(0).toUpperCase() + part.slice(1)
+    })
+    .join(' ')
 }
 
 /* ── Value formatting with units ── */
@@ -80,7 +115,7 @@ function formatBytes(bytes: number): string {
  */
 export function formatValue(value: unknown, key?: string): string {
   if (value === null || value === undefined) return '—'
-  if (typeof value === 'boolean') return value ? 'да' : 'нет'
+  if (typeof value === 'boolean') return value ? 'Да' : 'Нет'
   if (typeof value === 'object') return JSON.stringify(value)
 
   if (typeof value === 'number' && key) {
@@ -91,6 +126,10 @@ export function formatValue(value: unknown, key?: string): string {
       return formatUptime(Math.floor(value))
     }
 
+    if (k.endsWith('_ms') || k.includes('millis')) {
+      return `${Number(value).toLocaleString('ru-RU')} мс`
+    }
+
     // Memory / heap in bytes → KB/MB
     if (k === 'heap' || k === 'free_heap' || k.includes('heap') || k.includes('memory')) {
       return formatBytes(value)
@@ -98,7 +137,7 @@ export function formatValue(value: unknown, key?: string): string {
 
     // RSSI in dBm
     if (k === 'rssi' || k.includes('rssi')) {
-      return `${value} dBm`
+      return `${Math.round(value)} dBm`
     }
 
     // Temperature
@@ -112,7 +151,7 @@ export function formatValue(value: unknown, key?: string): string {
     }
 
     // Pressure
-    if (k === 'pressure' || k.includes('press')) {
+    if (k === 'pressure' || k === 'pressure_hpa' || k.includes('press')) {
       return `${Number(value).toFixed(0)} гПа`
     }
 
@@ -122,7 +161,7 @@ export function formatValue(value: unknown, key?: string): string {
     }
 
     // Battery percentage
-    if (k === 'battery' || k === 'bat' || k.includes('battery')) {
+    if (k === 'battery' || k === 'bat' || k.includes('battery') || k.endsWith('_pct') || k.endsWith('_percent')) {
       return `${Number(value).toFixed(0)} %`
     }
 
@@ -131,9 +170,21 @@ export function formatValue(value: unknown, key?: string): string {
       return `${Number(value).toFixed(0)} лк`
     }
 
+    if (k === 'co2') {
+      return `${Number(value).toFixed(0)} ppm`
+    }
+
+    if (k === 'pm25' || k === 'pm2_5' || k === 'pm10') {
+      return `${Number(value).toFixed(0)} мкг/м³`
+    }
+
+    if (k.includes('soil')) {
+      return `${Number(value).toFixed(0)} %`
+    }
+
     // Interval in seconds
     if (k === 'interval' || k === 'interval_s') {
-      return `${value} с`
+      return `${Number(value).toLocaleString('ru-RU')} с`
     }
 
     // Capture count — just a number
@@ -142,7 +193,7 @@ export function formatValue(value: unknown, key?: string): string {
     }
 
     // Generic number — keep as is
-    return String(value)
+    return Number.isInteger(value) ? value.toLocaleString('ru-RU') : value.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
   }
 
   return String(value)

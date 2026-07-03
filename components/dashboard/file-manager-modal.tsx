@@ -7,6 +7,12 @@ import { Input } from '@/components/ui/input'
 import { Card } from '@/components/ui/card'
 import type { Telemetry } from '@/lib/types'
 
+const formatBytes = (bytes: number) => {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
 export function FileManagerModal({
   isOpen,
   onClose,
@@ -89,90 +95,118 @@ export function FileManagerModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-      <Card className="w-full max-w-md overflow-hidden flex flex-col border-border/50 shadow-2xl h-[500px]">
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-border bg-muted/30 shrink-0">
-          <h3 className="font-semibold flex items-center gap-2 text-foreground">
-            <FolderOpen className="size-4 text-emerald-500" />
-            Менеджер файлов (LittleFS)
-          </h3>
-          <Button variant="ghost" size="icon-xs" onClick={onClose} disabled={isSending}>
-            <X className="size-4" />
-          </Button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-3 backdrop-blur-xl sm:p-6">
+      <Card className="flex h-[min(760px,92vh)] w-full max-w-3xl flex-col overflow-hidden border-white/10 bg-card/90 shadow-2xl">
+        <div className="shrink-0 border-b border-border bg-background/35 px-4 py-4 sm:px-5">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                <FolderOpen className="size-5" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="truncate text-lg font-semibold tracking-tight text-foreground">LittleFS</h3>
+                <p className="mt-0.5 text-sm text-muted-foreground">
+                  {viewMode === 'list' ? `${fileList.length} файлов на устройстве` : editingFile}
+                </p>
+              </div>
+            </div>
+            <Button variant="ghost" size="icon-sm" onClick={onClose} disabled={isSending} title="Закрыть">
+              <X className="size-4" />
+            </Button>
+          </div>
         </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-hidden bg-background/50 flex flex-col relative">
+        <div className="flex min-h-0 flex-1 flex-col bg-background/20">
           {viewMode === 'list' ? (
-            <div className="flex-1 flex flex-col p-4 gap-4 overflow-hidden">
-              <div className="flex justify-between items-center shrink-0">
-                <Button size="sm" variant="outline" onClick={handleRefresh} disabled={isSending || isRefreshing}>
-                  <RefreshCw className={`size-3 mr-1.5 ${isRefreshing ? 'animate-spin' : ''}`} />
-                  Обновить
-                </Button>
-                <Button size="sm" onClick={handleCreateFile} disabled={isSending}>
-                  <Plus className="size-3 mr-1.5" />
-                  Создать
-                </Button>
+            <div className="flex min-h-0 flex-1 flex-col gap-4 p-4 sm:p-5">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Файловая система</p>
+                  <p className="mt-1 text-sm text-muted-foreground">Ответы приходят асинхронно через MQTT.</p>
+                </div>
+                <div className="grid grid-cols-2 gap-2 sm:flex">
+                  <Button size="sm" variant="outline" onClick={handleRefresh} disabled={isSending || isRefreshing} className="h-10">
+                    <RefreshCw className={`size-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+                    Обновить
+                  </Button>
+                  <Button size="sm" onClick={handleCreateFile} disabled={isSending} className="h-10">
+                    <Plus className="size-4" />
+                    Создать
+                  </Button>
+                </div>
               </div>
-              
-              <div className="flex-1 overflow-y-auto border border-border rounded-md bg-background">
+
+              <div className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-border bg-background/55">
                 {fileList.length === 0 ? (
-                  <div className="p-8 text-center text-sm text-muted-foreground flex flex-col items-center gap-2">
-                    <FolderOpen className="size-8 opacity-20" />
-                    <p>Нет файлов или ожидание ответа...</p>
+                  <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-sm text-muted-foreground">
+                    <div className="flex size-14 items-center justify-center rounded-2xl bg-muted">
+                      <FolderOpen className="size-7 opacity-60" />
+                    </div>
+                    <div>
+                      <p className="font-medium text-foreground">Файлы не загружены</p>
+                      <p className="mt-1 max-w-xs">Нажмите обновить или дождитесь ответа устройства.</p>
+                    </div>
                   </div>
                 ) : (
-                  <div className="divide-y divide-border">
+                  <div className="max-h-full overflow-y-auto p-2">
                     {fileList.map((f, i) => (
-                      <div key={i} className="flex justify-between items-center p-3 hover:bg-muted/50 transition-colors group">
-                        <div 
-                          className="flex items-center gap-3 cursor-pointer flex-1" 
-                          onClick={() => handleOpenFile(f.name)}
-                        >
-                          <FileText className="size-4 text-primary/60 group-hover:text-primary transition-colors" />
-                          <span className="text-sm font-medium">{f.name}</span>
-                        </div>
-                        <span className="text-xs text-muted-foreground whitespace-nowrap bg-muted px-2 py-0.5 rounded-full">{f.size} B</span>
-                      </div>
+                      <button
+                        key={`${f.name}-${i}`}
+                        type="button"
+                        className="group flex min-h-14 w-full items-center justify-between gap-3 rounded-xl px-3 text-left transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        onClick={() => handleOpenFile(f.name)}
+                      >
+                        <span className="flex min-w-0 items-center gap-3">
+                          <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                            <FileText className="size-4" />
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm font-medium text-foreground">{f.name}</span>
+                            <span className="text-xs text-muted-foreground">Открыть для редактирования</span>
+                          </span>
+                        </span>
+                        <span className="shrink-0 rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">
+                          {formatBytes(f.size)}
+                        </span>
+                      </button>
                     ))}
                   </div>
                 )}
               </div>
-              <p className="text-[10px] text-muted-foreground text-center shrink-0">
-                Данные загружаются асинхронно через MQTT.
-              </p>
             </div>
           ) : (
-            <div className="flex-1 flex flex-col p-4 gap-3 overflow-hidden animate-in fade-in slide-in-from-right-4 duration-300">
-              <div className="flex items-center gap-2 shrink-0">
-                <Button size="icon-xs" variant="ghost" onClick={() => { setViewMode('list'); handleRefresh() }} disabled={isSending}>
+            <div className="flex min-h-0 flex-1 flex-col gap-4 p-4 sm:p-5">
+              <div className="grid gap-3 sm:grid-cols-[auto_1fr] sm:items-center">
+                <Button size="sm" variant="outline" onClick={() => { setViewMode('list'); handleRefresh() }} disabled={isSending} className="h-10 justify-start sm:w-28">
                   <ArrowLeft className="size-4" />
+                  Назад
                 </Button>
-                <Input 
-                  value={editingFile} 
-                  onChange={e => setEditingFile(e.target.value)} 
-                  className="h-9 font-mono text-sm bg-muted/50 focus-visible:bg-background"
+                <Input
+                  value={editingFile}
+                  onChange={e => setEditingFile(e.target.value)}
+                  className="h-10 rounded-xl bg-background/65 font-mono text-sm"
                   disabled={isSending}
+                  aria-label="Путь файла"
                 />
               </div>
+
               <textarea
-                className="flex-1 w-full rounded-md border border-input bg-background/50 focus:bg-background p-3 text-sm font-mono focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/50 resize-none transition-colors"
+                className="min-h-0 flex-1 resize-none rounded-2xl border border-input bg-background/65 p-4 font-mono text-sm leading-6 transition-colors placeholder:text-muted-foreground focus:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 value={fileContent}
                 onChange={e => setFileContent(e.target.value)}
                 disabled={isSending || fileContent === 'Загрузка...'}
                 placeholder="Содержимое файла..."
                 spellCheck={false}
               />
-              <div className="flex justify-between items-center shrink-0">
-                <Button size="sm" variant="destructive" onClick={handleDelete} disabled={isSending}>
-                  <Trash2 className="size-3 mr-1.5" />
+
+              <div className="flex flex-col-reverse gap-2 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+                <Button size="sm" variant="destructive" onClick={handleDelete} disabled={isSending} className="h-10">
+                  <Trash2 className="size-4" />
                   Удалить
                 </Button>
-                <Button size="sm" onClick={handleSave} disabled={isSending}>
-                  <Save className="size-3 mr-1.5" />
-                  Сохранить
+                <Button size="sm" onClick={handleSave} disabled={isSending} className="h-10">
+                  <Save className="size-4" />
+                  Сохранить файл
                 </Button>
               </div>
             </div>

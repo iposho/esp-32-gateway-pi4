@@ -17,6 +17,7 @@ import {
   Upload,
   Cpu,
   FolderOpen,
+  WifiOff,
 } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -30,6 +31,34 @@ import { FileManagerModal } from './file-manager-modal'
 
 
 type DeviceWithLatest = Device & { latest: Telemetry | null }
+
+const SERVICE_TELEMETRY_KEYS = new Set([
+  'last_photo_url',
+  'ota',
+  'progress',
+  'camera_ready',
+  'pin_error',
+  'pin_status',
+  'fs_ls',
+  'fs_file',
+  'content',
+])
+
+const isServiceTelemetryKey = (key: string) => {
+  const normalized = key.toLowerCase()
+  return (
+    SERVICE_TELEMETRY_KEYS.has(normalized) ||
+    normalized.startsWith('pin_') ||
+    normalized.startsWith('fs_')
+  )
+}
+
+const OTA_LABELS: Record<string, string> = {
+  downloading: 'OTA: загрузка',
+  writing: 'OTA: запись',
+  success: 'OTA: готово',
+  failed: 'OTA: ошибка',
+}
 
 export function DeviceCard({
   device,
@@ -54,12 +83,21 @@ export function DeviceCard({
 
   const online = device.is_online
   const payload = device.latest?.payload ?? {}
-  const entries = Object.entries(payload).filter(([k]) => k !== 'last_photo_url' && k !== 'ota' && k !== 'progress')
+  const entries = Object.entries(payload).filter(([k]) => !isServiceTelemetryKey(k))
   const isCamera = payload.camera_ready !== undefined || payload.last_photo_url !== undefined
   
   const otaStatus = payload.ota as string | undefined
   const otaProgress = typeof payload.progress === 'number' ? payload.progress : 0
   const isOtaActive = otaStatus && otaStatus !== 'failed' && otaStatus !== 'success'
+  const otaLabel = otaStatus ? OTA_LABELS[otaStatus] ?? `OTA: ${otaStatus}` : null
+  const cameraReady = payload.camera_ready === true
+  const cameraStatusLabel =
+    payload.camera_ready === true
+      ? 'Камера готова'
+      : payload.camera_ready === false
+        ? 'Камера не готова'
+        : 'Есть снимок'
+  const hasCameraSignal = cameraReady || Boolean(payload.last_photo_url)
 
   // Обновляем картинку при изменении телеметрии с новой фотографией
   useEffect(() => {
@@ -162,55 +200,37 @@ export function DeviceCard({
   return (
     <>
       <Card
-        className={`group/card relative flex flex-col overflow-hidden transition-all duration-300 ${
+        className={`group/card relative flex flex-col overflow-hidden bg-card/75 transition-all duration-300 hover:-translate-y-0.5 hover:border-white/20 ${
         isDeleting ? 'opacity-50 pointer-events-none scale-[0.98]' : ''
-      } ${online ? 'hover:shadow-md hover:shadow-emerald-500/5' : 'hover:shadow-md'}`}
+      } ${online ? 'hover:shadow-emerald-500/10' : ''}`}
     >
       {/* ── Status accent strip ── */}
       <div
-        className={`h-[2px] w-full transition-colors duration-500 ${
+        className={`h-1 w-full transition-colors duration-500 ${
           online
-            ? 'bg-gradient-to-r from-emerald-500/60 via-emerald-400/40 to-emerald-500/60'
-            : 'bg-gradient-to-r from-zinc-300/40 via-zinc-400/20 to-zinc-300/40 dark:from-zinc-700/40 dark:via-zinc-600/20 dark:to-zinc-700/40'
+            ? 'bg-gradient-to-r from-emerald-500 via-primary to-emerald-400'
+            : 'bg-muted'
         }`}
       />
 
       {/* ── Header ── */}
-      <div className="flex items-start justify-between gap-3 p-4 pb-3">
+      <div className="flex items-start justify-between gap-3 p-4 pb-3 sm:p-5 sm:pb-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2.5">
             <div
-              className={`flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors ${
+              className={`flex size-11 shrink-0 items-center justify-center rounded-2xl transition-colors ${
                 online
-                  ? 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-400/10 dark:text-emerald-400'
+                  ? 'bg-emerald-500/10 text-emerald-600 shadow-inner shadow-white/10 dark:bg-emerald-400/10 dark:text-emerald-400'
                   : 'bg-zinc-100 text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500'
               }`}
             >
               <Activity className="size-4" />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <h3 className="truncate text-sm font-semibold text-foreground">{device.name}</h3>
-                <Badge
-                  variant={online ? 'online' : 'offline'}
-                  className={`shrink-0 text-[10px] px-1.5 py-0 h-[18px] ${
-                    online ? '' : 'opacity-60'
-                  }`}
-                >
-                  {online ? (
-                    <>
-                      <span className="relative flex size-1.5">
-                        <span className="absolute inline-flex size-full animate-ping rounded-full bg-current opacity-40" />
-                        <span className="relative inline-flex size-1.5 rounded-full bg-current" />
-                      </span>
-                      Online
-                    </>
-                  ) : (
-                    'Offline'
-                  )}
-                </Badge>
+              <div className="flex min-w-0 items-center gap-2">
+                <h3 className="truncate text-base font-semibold tracking-tight text-foreground">{device.name}</h3>
               </div>
-              <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
+              <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
                 <span className="truncate font-mono opacity-70">{device.device_id}</span>
                 <span className="text-border">·</span>
                 <span className="shrink-0 tabular-nums">{timeAgo(device.last_seen)}</span>
@@ -221,8 +241,8 @@ export function DeviceCard({
         {onDelete && (
           <Button
             variant="ghost"
-            size="icon-xs"
-            className="text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10 shrink-0 opacity-0 group-hover/card:opacity-100 transition-opacity"
+            size="icon-sm"
+            className="shrink-0 text-muted-foreground/55 opacity-100 hover:bg-destructive/10 hover:text-destructive sm:opacity-0 sm:group-hover/card:opacity-100"
             onClick={handleDelete}
             title="Удалить устройство"
           >
@@ -231,18 +251,71 @@ export function DeviceCard({
         )}
       </div>
 
+      <div className="px-4 pb-3 sm:px-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge
+            variant={online ? 'online' : 'outline'}
+            className={`h-7 px-2.5 text-xs ${online ? '' : 'border-border text-muted-foreground'}`}
+          >
+            {online ? (
+              <>
+                <span className="relative flex size-1.5">
+                  <span className="absolute inline-flex size-full animate-ping rounded-full bg-current opacity-40" />
+                  <span className="relative inline-flex size-1.5 rounded-full bg-current" />
+                </span>
+                Онлайн
+              </>
+            ) : (
+              <>
+                <WifiOff className="size-3" />
+                Оффлайн
+              </>
+            )}
+          </Badge>
+
+          {isCamera && (
+            <Badge
+              variant="outline"
+              className={`h-7 px-2.5 text-xs ${
+                hasCameraSignal
+                  ? 'border-primary/25 bg-primary/10 text-primary'
+                  : 'border-border text-muted-foreground'
+              }`}
+            >
+              {hasCameraSignal ? <Camera className="size-3" /> : <CameraOff className="size-3" />}
+              {cameraStatusLabel}
+            </Badge>
+          )}
+
+          {otaLabel && (
+            <Badge
+              variant="outline"
+              className={`h-7 px-2.5 text-xs ${
+                otaStatus === 'failed'
+                  ? 'border-destructive/25 bg-destructive/10 text-destructive'
+                  : 'border-primary/25 bg-primary/10 text-primary'
+              }`}
+            >
+              <RefreshCw className={`size-3 ${isOtaActive ? 'animate-spin' : ''}`} />
+              {otaLabel}
+              {isOtaActive ? ` ${Math.round(otaProgress)}%` : ''}
+            </Badge>
+          )}
+        </div>
+      </div>
+
       {/* ── Camera section ── */}
       {isCamera && (
-        <div className="px-4 pb-3">
-          <div className="overflow-hidden rounded-lg border border-border bg-muted/30">
+        <div className="px-4 pb-3 sm:px-5">
+          <div className="overflow-hidden rounded-2xl border border-border bg-muted/25">
             {!online ? (
               /* ── Offline camera placeholder ── */
-              <div className="flex aspect-video flex-col items-center justify-center gap-2 bg-muted/40 text-muted-foreground/50">
+              <div className="flex aspect-video flex-col items-center justify-center gap-2 bg-muted/40 text-muted-foreground/60">
                 <CameraOff className="size-8 opacity-40" />
                 <span className="text-xs">Камера офлайн</span>
               </div>
             ) : payload.last_photo_url ? (
-              <div className="relative aspect-video bg-black/5 dark:bg-black/20 flex items-center justify-center">
+              <div className="relative flex aspect-video items-center justify-center bg-black/5 dark:bg-black/20">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={`/api/devices/${device.device_id}/camera?t=${imgTimestamp}`}
@@ -253,16 +326,16 @@ export function DeviceCard({
                 />
               </div>
             ) : (
-              <div className="flex aspect-video items-center justify-center text-xs text-muted-foreground">
+              <div className="flex aspect-video items-center justify-center text-sm text-muted-foreground">
                 Нет снимка
               </div>
             )}
             {online && (
-              <div className="flex items-center gap-1.5 border-t border-border bg-muted/40 p-1.5">
+              <div className="flex items-center gap-2 border-t border-border bg-background/45 p-2">
                 <Button
-                  size="xs"
+                  size="sm"
                   variant="ghost"
-                  className="flex-1 text-[11px] text-muted-foreground hover:text-foreground"
+                  className="h-9 flex-1 text-xs text-muted-foreground hover:text-foreground"
                   disabled={!online || sending !== null}
                   onClick={capturePhoto}
                 >
@@ -271,7 +344,7 @@ export function DeviceCard({
                 </Button>
                 <div className="w-px h-4 bg-border" />
                 <Button
-                  size="icon-xs"
+                  size="icon-sm"
                   variant="ghost"
                   className="text-muted-foreground hover:text-foreground shrink-0"
                   onClick={refreshPhoto}
@@ -287,14 +360,14 @@ export function DeviceCard({
 
       {/* ── OTA Progress ── */}
       {otaStatus && (
-        <div className="px-4 pb-3">
-          <div className="rounded-lg border border-border bg-muted/20 p-3">
-            <div className="flex items-center justify-between mb-2 text-[10px] font-semibold uppercase tracking-widest text-primary">
+        <div className="px-4 pb-3 sm:px-5">
+          <div className="rounded-2xl border border-primary/15 bg-primary/10 p-3">
+            <div className="mb-2 flex items-center justify-between text-xs font-semibold uppercase tracking-[0.16em] text-primary">
               <span className="flex items-center gap-1.5">
                 <RefreshCw className={`size-3 ${isOtaActive ? 'animate-spin' : ''}`} />
-                OTA Update
+                Обновление прошивки
               </span>
-              <span className="text-muted-foreground">{otaStatus}</span>
+              <span className="text-muted-foreground">{otaLabel}</span>
             </div>
             <div className="h-1.5 w-full overflow-hidden rounded-full bg-border">
               <div 
@@ -303,16 +376,16 @@ export function DeviceCard({
               />
             </div>
             <div className="mt-1.5 text-right text-[10px] font-medium text-muted-foreground">
-              {otaProgress}%
+              {Math.round(otaProgress)}%
             </div>
           </div>
         </div>
       )}
 
       {/* ── Telemetry ── */}
-      <div className="px-4 pb-3">
-        <div className="rounded-lg border border-border bg-muted/20 p-3">
-          <div className="mb-2.5 flex items-center gap-1.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">
+      <div className="px-4 pb-3 sm:px-5">
+        <div className="rounded-2xl border border-border bg-background/35 p-3">
+          <div className="mb-2.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
             <Gauge className="size-3" />
             Телеметрия
           </div>
@@ -323,12 +396,12 @@ export function DeviceCard({
               {entries.slice(0, expanded ? entries.length : 4).map(([k, v], i) => (
                 <div
                   key={k}
-                  className={`flex items-center justify-between gap-3 py-1.5 ${
+                  className={`flex items-center justify-between gap-3 py-2 ${
                     i > 0 ? 'border-t border-border/50' : ''
                   }`}
                 >
-                  <span className="truncate text-xs text-muted-foreground">{labelForKey(k)}</span>
-                  <span className="font-mono text-xs font-medium text-foreground tabular-nums shrink-0">
+                  <span className="min-w-0 truncate text-sm text-muted-foreground">{labelForKey(k)}</span>
+                  <span className="shrink-0 text-right font-mono text-sm font-medium tabular-nums text-foreground">
                     {formatValue(v, k)}
                   </span>
                 </div>
@@ -338,7 +411,7 @@ export function DeviceCard({
           {entries.length > 4 && (
             <button
               onClick={() => setExpanded((s) => !s)}
-              className="mt-2 flex items-center gap-1 text-[11px] font-medium text-primary/70 hover:text-primary transition-colors"
+              className="mt-2 flex min-h-9 items-center gap-1 text-xs font-medium text-primary/75 transition-colors hover:text-primary"
             >
               <ChevronDown
                 className={`size-3 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}
@@ -350,54 +423,58 @@ export function DeviceCard({
       </div>
 
       {/* ── Actions ── */}
-      <div className="px-4 pb-3">
-        <div className="flex items-center gap-1.5 mb-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">
+      <div className="px-4 pb-4 sm:px-5">
+        <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
           <Zap className="size-3" />
           Управление
         </div>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="grid grid-cols-2 gap-2">
           <Button
-            size="xs"
+            size="sm"
             variant={ledOn ? 'default' : 'outline'}
             disabled={!online || sending !== null}
             onClick={toggleLed}
-            className={ledOn ? '' : ''}
+            className="h-9 justify-start"
           >
             <Lightbulb className="size-3" />
             {sending === 'led' ? '…' : ledOn ? 'LED выкл' : 'LED вкл'}
           </Button>
           <Button
-            size="xs"
+            size="sm"
             variant="outline"
             disabled={!online || sending !== null}
             onClick={reboot}
+            className="h-9 justify-start"
           >
             <RotateCw className={`size-3 ${sending === 'reboot' ? 'animate-spin' : ''}`} />
             {sending === 'reboot' ? '…' : 'Ребут'}
           </Button>
           <Button
-            size="xs"
+            size="sm"
             variant="outline"
             disabled={!online || sending !== null || isUploading}
             onClick={() => fileInputRef.current?.click()}
+            className="h-9 justify-start"
           >
             <Upload className={`size-3 ${isUploading ? 'animate-bounce' : ''}`} />
             {isUploading ? 'OTA...' : 'OTA'}
           </Button>
           <Button
-            size="xs"
+            size="sm"
             variant="outline"
             disabled={!online || sending !== null}
             onClick={() => setIsPinModalOpen(true)}
+            className="h-9 justify-start"
           >
             <Cpu className="size-3" />
             Пины
           </Button>
           <Button
-            size="xs"
+            size="sm"
             variant="outline"
             disabled={!online || sending !== null}
             onClick={() => setIsFileModalOpen(true)}
+            className="h-9 justify-start"
           >
             <FolderOpen className="size-3" />
             Файлы
@@ -412,19 +489,21 @@ export function DeviceCard({
           {isBalcony && (
             <>
               <Button
-                size="xs"
+                size="sm"
                 variant="outline"
                 disabled={!online || sending !== null}
                 onClick={() => send({ action: 'sync' }, 'sync')}
+                className="h-9 justify-start"
               >
                 <RefreshCw className={`size-3 ${sending === 'sync' ? 'animate-spin' : ''}`} />
                 {sending === 'sync' ? '…' : 'Синх.'}
               </Button>
               <Button
-                size="xs"
+                size="sm"
                 variant="outline"
                 disabled={!online || sending !== null}
                 onClick={() => send({ action: 'push' }, 'push')}
+                className="h-9 justify-start"
               >
                 <Send className={`size-3 ${sending === 'push' ? 'animate-spin' : ''}`} />
                 {sending === 'push' ? '…' : 'Push'}
@@ -435,25 +514,25 @@ export function DeviceCard({
       </div>
 
       {/* ── Custom command ── */}
-      <div className="mt-auto border-t border-border/50 bg-muted/20 px-4 py-3">
-        <div className="flex items-center gap-1.5 mb-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">
+      <div className="mt-auto border-t border-border/50 bg-background/30 px-4 py-3 sm:px-5">
+        <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
           <Terminal className="size-3" />
           Произвольная команда
         </div>
-        <div className="flex gap-1.5">
+        <div className="flex gap-2">
           <Input
             value={custom}
             onChange={(e) => setCustom(e.target.value)}
-            className="h-7 font-mono text-[11px]"
+            className="h-9 rounded-xl bg-background/60 font-mono text-xs"
             spellCheck={false}
             placeholder='{ "action": "..." }'
           />
           <Button
-            size="xs"
+            size="sm"
             variant="outline"
             disabled={!online || sending !== null}
             onClick={sendCustom}
-            className="shrink-0"
+            className="h-9 shrink-0"
           >
             <Send className="size-3" />
             {sending === 'custom' ? '…' : 'Отпр.'}

@@ -74,17 +74,17 @@ export function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen">
       {/* ── Sticky header ── */}
-      <header className="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 sm:px-6 py-3">
+      <header className="sticky top-0 z-10 border-b border-white/10 bg-background/70 backdrop-blur-2xl supports-[backdrop-filter]:bg-background/55">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
           <div className="flex items-center gap-3">
-            <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
+            <div className="flex size-9 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/20">
               <Cpu className="size-4" />
             </div>
             <div>
-              <h1 className="text-sm font-semibold leading-tight text-foreground">ESP32 Gateway</h1>
-              <p className="text-[11px] text-muted-foreground">esp32.kuzyak.in</p>
+              <h1 className="text-base font-semibold leading-tight text-foreground">ESP32 Gateway</h1>
+              <p className="text-xs text-muted-foreground">esp32.kuzyak.in</p>
             </div>
           </div>
           <div className="flex items-center gap-1.5">
@@ -110,9 +110,18 @@ export function Dashboard() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 sm:px-6 py-6">
+      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
+        <div className="mb-6 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Панель</p>
+            <h2 className="mt-1 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+              Устройства и телеметрия
+            </h2>
+          </div>
+        </div>
+
         {/* ── Stats row ── */}
-        <div className="mb-6 grid grid-cols-3 gap-3">
+        <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
           <StatCard
             icon={<Radio className="size-4" />}
             label="Всего"
@@ -135,7 +144,7 @@ export function Dashboard() {
 
         {/* ── Error ── */}
         {error && (
-          <Card className="mb-6 border-destructive/20 bg-destructive/5">
+          <Card className="mb-6 border-destructive/20 bg-destructive/10">
             <CardContent className="py-3 px-4 text-sm text-destructive flex items-center gap-2">
               <Activity className="size-4 shrink-0" />
               Не удалось загрузить устройства. Проверьте подключение к Supabase.
@@ -150,7 +159,7 @@ export function Dashboard() {
             <span className="text-sm text-muted-foreground">Загрузка списка устройств...</span>
           </div>
         ) : devices.length === 0 ? (
-          <Card className="border-dashed bg-transparent shadow-none">
+          <Card className="border-dashed bg-card/50 shadow-none">
             <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
               <div className="flex size-12 items-center justify-center rounded-full bg-muted">
                 <Radio className="size-5 text-muted-foreground" />
@@ -163,7 +172,7 @@ export function Dashboard() {
             </CardContent>
           </Card>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {devices.map((d) => (
               <DeviceCard key={d.id} device={d} onCommand={sendCommand} onDelete={deleteDevice} />
             ))}
@@ -171,7 +180,7 @@ export function Dashboard() {
         )}
 
         {/* ── Commands reference ── */}
-        <div className="mt-10">
+        <div className="mt-8">
           <CommandsReference />
         </div>
       </main>
@@ -205,15 +214,15 @@ function StatCard({
 
   return (
     <Card className="overflow-hidden">
-      <CardContent className="flex items-center gap-3 p-4">
-        <div className={`flex size-9 shrink-0 items-center justify-center rounded-lg ${iconBgStyles[color]}`}>
+      <CardContent className="flex items-center gap-3 p-4 sm:p-5">
+        <div className={`flex size-10 shrink-0 items-center justify-center rounded-2xl ${iconBgStyles[color]}`}>
           {icon}
         </div>
         <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider truncate">
+          <p className="truncate text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
             {label}
           </p>
-          <p className={`text-2xl font-bold tracking-tight tabular-nums ${colorStyles[color]}`}>
+          <p className={`text-3xl font-semibold tracking-tight tabular-nums ${colorStyles[color]}`}>
             {value}
           </p>
         </div>

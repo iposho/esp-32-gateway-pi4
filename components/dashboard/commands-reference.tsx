@@ -9,15 +9,17 @@ export function CommandsReference() {
   const [open, setOpen] = useState(false)
 
   return (
-    <Card className="overflow-hidden">
+    <Card className="overflow-hidden bg-card/70">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left hover:bg-muted/30 transition-colors"
+        className="flex min-h-14 w-full items-center justify-between gap-2 px-4 py-3 text-left transition-colors hover:bg-muted/35 sm:px-5"
       >
-        <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-          <BookOpen className="size-4 text-muted-foreground" />
-          Справочник MQTT и команд
+        <div className="flex items-center gap-3 text-sm font-semibold text-foreground">
+          <span className="flex size-9 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+            <BookOpen className="size-4" />
+          </span>
+          <span>Справочник MQTT и команд</span>
         </div>
         <ChevronDown
           className={`size-4 shrink-0 text-muted-foreground transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
@@ -25,12 +27,12 @@ export function CommandsReference() {
       </button>
 
       {open && (
-        <div className="flex flex-col gap-5 border-t border-border px-4 py-4">
+        <div className="flex flex-col gap-5 border-t border-border px-4 py-4 sm:px-5">
           <section>
-            <h3 className="mb-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
               Топики
             </h3>
-            <div className="overflow-x-auto rounded-lg border border-border">
+            <div className="overflow-x-auto rounded-2xl border border-border bg-background/35">
               <table className="w-full min-w-[32rem] text-left text-sm">
                 <thead className="border-b border-border bg-muted/50 text-[11px] text-muted-foreground">
                   <tr>
@@ -41,7 +43,7 @@ export function CommandsReference() {
                 </thead>
                 <tbody className="divide-y divide-border">
                   {MQTT_TOPICS.map((row) => (
-                    <tr key={row.topic} className="hover:bg-muted/20 transition-colors">
+                    <tr key={row.topic} className="transition-colors hover:bg-muted/30">
                       <td className="px-3 py-2 font-mono text-xs">{row.topic}</td>
                       <td className="px-3 py-2 text-muted-foreground text-xs">{row.direction}</td>
                       <td className="px-3 py-2">
@@ -58,10 +60,10 @@ export function CommandsReference() {
           </section>
 
           <section>
-            <h3 className="mb-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
               Команды (action)
             </h3>
-            <div className="overflow-x-auto rounded-lg border border-border">
+            <div className="overflow-x-auto rounded-2xl border border-border bg-background/35">
               <table className="w-full min-w-[28rem] text-left text-sm">
                 <thead className="border-b border-border bg-muted/50 text-[11px] text-muted-foreground">
                   <tr>
@@ -73,7 +75,7 @@ export function CommandsReference() {
                 </thead>
                 <tbody className="divide-y divide-border">
                   {COMMAND_REFERENCE.map((cmd) => (
-                    <tr key={cmd.action} className="hover:bg-muted/20 transition-colors">
+                    <tr key={cmd.action} className="transition-colors hover:bg-muted/30">
                       <td className="px-3 py-2 font-mono text-xs">{cmd.action}</td>
                       <td className="px-3 py-2 text-xs">{cmd.title}</td>
                       <td className="px-3 py-2">
