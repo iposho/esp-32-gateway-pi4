@@ -5,7 +5,7 @@ import useSWR from 'swr'
 import Link from 'next/link'
 import { useRouter, useParams } from 'next/navigation'
 import { Home, LogOut, RefreshCw, Activity } from 'lucide-react'
-import { BrandLogo } from '@/components/brand-logo'
+import { DashboardHeaderBrand } from '@/components/dashboard/dashboard-header-brand'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { DeviceDetailView } from '@/components/dashboard/device-detail-view'
@@ -90,18 +90,7 @@ export function DeviceDetailPage() {
     <div className="min-h-screen">
       <header className="sticky top-0 z-10 border-b border-white/10 bg-background/70 backdrop-blur-2xl supports-[backdrop-filter]:bg-background/55">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
-          <Link
-            href="/"
-            className="flex min-w-0 items-center gap-3 rounded-lg transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-          >
-            <BrandLogo size={36} />
-            <div className="min-w-0">
-              <h1 className="text-base font-semibold leading-tight text-foreground">
-                ESP32 Gateway
-              </h1>
-              <p className="text-xs text-muted-foreground">esp32.kuzyak.in</p>
-            </div>
-          </Link>
+          <DashboardHeaderBrand />
           <div className="flex items-center gap-1.5">
             <Button
               variant="ghost"
