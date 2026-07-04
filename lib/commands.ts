@@ -25,6 +25,7 @@ import {
   Power,
   Fan,
   Bell,
+  Circle,
   type LucideIcon,
 } from "lucide-react";
 
@@ -40,6 +41,8 @@ const ICON_MAP: Record<string, LucideIcon> = {
   power: Power,
   fan: Fan,
   bell: Bell,
+  circle: Circle,
+  dot: Circle,
 };
 
 /** Получить компонент иконки по строковому идентификатору из скетча */
