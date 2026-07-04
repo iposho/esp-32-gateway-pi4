@@ -91,8 +91,8 @@ docker run --rm -it -v "$PWD/mosquitto/config:/mosquitto/config" \
   eclipse-mosquitto:2 mosquitto_passwd /mosquitto/config/passwd viewer
 ```
 
-ACL (`mosquitto/config/acl`) ограничивает топики: устройства пишут только в свои
-`status`/`telemetry` и читают `command`; бэкенд имеет полный доступ.
+ACL (`mosquitto/config/acl`) ограничивает топики: устройства пишут в свои
+`status`/`telemetry`/`capabilities` и читают `command`; бэкенд имеет полный доступ.
 
 Проверка брокера:
 ```bash
@@ -111,8 +111,9 @@ mosquitto_pub -h <IP_Pi> -p 1883 -u esp32 -P <pass> \
 2. Задай переменные окружения flow (передаются в контейнер из `.env`):
    `SERVICE_ROLE_KEY`, `SUPABASE_REST`.
 3. Импортируй `node-red/flows.example.json` (Menu → Import).
-4. Flow подписывается на `devices/+/status` и `devices/+/telemetry`,
-   преобразует payload и делает upsert/insert в Supabase через PostgREST.
+4. Flow подписывается на `devices/+/status`, `devices/+/telemetry` и
+   `devices/+/capabilities`, преобразует payload и делает upsert/insert в Supabase
+   через PostgREST.
 5. Нажми **Deploy**.
 
 Проверка: опубликуй тестовое сообщение (см. выше) — в Debug-панели Node-RED
@@ -258,4 +259,5 @@ docker-compose.yml       # единый стек
 |-------|-------------|---------|
 | `devices/<id>/status` | ESP32 → | `{"status":"online"}` (retained + LWT) |
 | `devices/<id>/telemetry` | ESP32 → | `{"uptime":123,"rssi":-60,"heap":40000}`<br>`{"ota":"downloading","progress":40}` |
+| `devices/<id>/capabilities` | ESP32 → | `{"commands":[{"action":"led","title":"Свет","type":"toggle"}]}` (retained) |
 | `devices/<id>/command` | → ESP32 | `{"action":"led","value":true}`<br>`{"action":"capture"}`<br>`{"action":"reboot"}`<br>`{"action":"pin_read","pin":32}`<br>`{"action":"pin_write","pin":2,"value":1}`<br>`{"action":"ota","url":"http://..."}` |

@@ -3,9 +3,10 @@
  * Библиотеки: WiFi.h, PubSubClient (Nick O'Leary), ArduinoJson.
  *
  * Топики:
- *   devices/<deviceId>/status     — online/offline (offline через LWT)
- *   devices/<deviceId>/telemetry  — JSON с метриками
- *   devices/<deviceId>/command    — входящие команды от админки
+ *   devices/<deviceId>/status        — online/offline (offline через LWT)
+ *   devices/<deviceId>/telemetry   — JSON с метриками
+ *   devices/<deviceId>/capabilities — описание команд для UI (retained)
+ *   devices/<deviceId>/command       — входящие команды от админки
  */
 #include <WiFi.h>
 #include <PubSubClient.h>
@@ -28,6 +29,33 @@ PubSubClient client(net);
 char topicStatus[64];
 char topicTelemetry[64];
 char topicCommand[64];
+char topicCapabilities[64];
+
+const char *CAPABILITIES = R"({
+  "commands": [
+    {
+      "action": "led",
+      "title": "Светодиод",
+      "type": "toggle",
+      "icon": "lightbulb",
+      "description": "Встроенный светодиод на GPIO (LED_BUILTIN)"
+    },
+    {
+      "action": "relay",
+      "title": "Реле",
+      "type": "toggle",
+      "icon": "zap",
+      "description": "Реле на GPIO2"
+    },
+    {
+      "action": "reboot",
+      "title": "Перезагрузка",
+      "type": "trigger",
+      "icon": "rotate-cw",
+      "description": "ESP.restart"
+    }
+  ]
+})";
 
 unsigned long lastTelemetry = 0;
 
@@ -62,6 +90,7 @@ void connect() {
     if (client.connect(DEVICE_ID, MQTT_USER, MQTT_PASS,
                        topicStatus, 1, true, "{\"status\":\"offline\"}")) {
       client.publish(topicStatus, "{\"status\":\"online\"}", true);
+      client.publish(topicCapabilities, CAPABILITIES, true);
       client.subscribe(topicCommand, 1);
     } else {
       Serial.printf("[MQTT] connect failed, rc=%d\n", client.state());
@@ -77,6 +106,7 @@ void setup() {
   snprintf(topicStatus, sizeof(topicStatus), "devices/%s/status", DEVICE_ID);
   snprintf(topicTelemetry, sizeof(topicTelemetry), "devices/%s/telemetry", DEVICE_ID);
   snprintf(topicCommand, sizeof(topicCommand), "devices/%s/command", DEVICE_ID);
+  snprintf(topicCapabilities, sizeof(topicCapabilities), "devices/%s/capabilities", DEVICE_ID);
 
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   while (WiFi.status() != WL_CONNECTED) delay(500);
