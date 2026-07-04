@@ -95,7 +95,8 @@ export const MQTT_TOPICS = [
   {
     topic: "devices/<id>/capabilities",
     direction: "ESP32 → брокер",
-    payload: '{ "commands": [...] }',
-    note: "Retained. Описание команд от скетча",
+    payload:
+      '{ "commands": [...], "metrics": [...], "dashboard": { "summary": ["ip","rssi"], "max_items": 4 } }',
+    note: "Retained. Команды и схема метрик для UI",
   },
 ] as const;

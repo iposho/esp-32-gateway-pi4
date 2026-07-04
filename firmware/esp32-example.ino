@@ -54,7 +54,17 @@ const char *CAPABILITIES = R"({
       "icon": "rotate-cw",
       "description": "ESP.restart"
     }
-  ]
+  ],
+  "metrics": [
+    { "key": "ip", "label": "IP", "icon": "globe", "group": "Сеть", "dashboard": true, "order": 0 },
+    { "key": "rssi", "label": "Сигнал", "icon": "signal", "format": "rssi", "group": "Сеть", "dashboard": true, "order": 1 },
+    { "key": "uptime", "label": "Аптайм", "icon": "clock", "format": "uptime", "group": "Система", "dashboard": true, "order": 2 },
+    { "key": "heap", "keys": ["heap", "free_heap"], "label": "RAM", "icon": "memory", "format": "bytes", "group": "Система", "dashboard": true, "order": 3 }
+  ],
+  "dashboard": {
+    "summary": ["ip", "rssi", "uptime", "heap"],
+    "max_items": 4
+  }
 })";
 
 unsigned long lastTelemetry = 0;
@@ -125,6 +135,7 @@ void loop() {
     doc["uptime"] = millis() / 1000;
     doc["rssi"] = WiFi.RSSI();
     doc["heap"] = ESP.getFreeHeap();
+    doc["ip"] = WiFi.localIP().toString();
     char buf[128];
     size_t n = serializeJson(doc, buf);
     client.publish(topicTelemetry, buf, n);

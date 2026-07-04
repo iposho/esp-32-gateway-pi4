@@ -35,21 +35,6 @@ export function Dashboard() {
   const devices = sortDevices(rawDevices)
   const online = devices.filter((d) => d.is_online).length
 
-  const sendCommand = useCallback(
-    async (deviceId: string, payload: Record<string, unknown>) => {
-      const res = await fetch('/api/command', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deviceId, payload }),
-      })
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}))
-        throw new Error(d.error ?? 'Ошибка')
-      }
-    },
-    [],
-  )
-
   const deleteDevice = useCallback(
     async (deviceId: string) => {
       const res = await fetch(`/api/devices/${deviceId}`, {
@@ -181,8 +166,11 @@ export function Dashboard() {
           <div>
             <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Панель</p>
             <h2 className="mt-1 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
-              Устройства и телеметрия
+              Устройства
             </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Краткий статус на панели · подробности на странице устройства
+            </p>
           </div>
         </div>
 
@@ -240,7 +228,6 @@ export function Dashboard() {
         ) : (
           <DeviceGrid
             devices={devices}
-            onCommand={sendCommand}
             onDelete={deleteDevice}
             onRename={renameDevice}
             onReorder={reorderDevices}

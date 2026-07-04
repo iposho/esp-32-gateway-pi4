@@ -1,7 +1,86 @@
 import { NextResponse } from 'next/server'
 import { getServiceClient } from '@/lib/supabase/server'
+import {
+  extractCameraFields,
+  groupTelemetryByDevice,
+  indexLatestPerDevice,
+  mergeCameraFieldsIntoTelemetry,
+  mergeTelemetryRows,
+} from '@/lib/telemetry'
+import { isDeviceActive, type Device, type Telemetry } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
+
+export async function GET(
+  _req: Request,
+  { params }: { params: Promise<{ deviceId: string }> },
+) {
+  let supabase
+  try {
+    supabase = getServiceClient()
+  } catch (e) {
+    return NextResponse.json(
+      { error: (e as Error).message },
+      { status: 503 },
+    )
+  }
+
+  const { deviceId } = await params
+
+  if (!deviceId) {
+    return NextResponse.json({ error: 'Device ID is required' }, { status: 400 })
+  }
+
+  const { data: device, error } = await supabase
+    .from('devices')
+    .select('*')
+    .eq('device_id', deviceId)
+    .maybeSingle()
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+
+  if (!device) {
+    return NextResponse.json({ error: 'Устройство не найдено' }, { status: 404 })
+  }
+
+  const [{ data: tele }, { data: cameraTele }] = await Promise.all([
+    supabase
+      .from('telemetry')
+      .select('*')
+      .eq('device_id', deviceId)
+      .order('created_at', { ascending: false })
+      .limit(50),
+    supabase
+      .from('telemetry')
+      .select('*')
+      .eq('device_id', deviceId)
+      .or('payload->>last_photo_url.not.is.null,payload->>camera_ready.not.is.null')
+      .order('created_at', { ascending: false })
+      .limit(50),
+  ])
+
+  const mergedRows = mergeTelemetryRows(tele as Telemetry[], cameraTele as Telemetry[])
+  const latestByDevice = indexLatestPerDevice(mergedRows)
+  const grouped = groupTelemetryByDevice(mergedRows)
+  const cameraFields = extractCameraFields(grouped[deviceId] ?? [])
+  const latestRow = mergeCameraFieldsIntoTelemetry(
+    latestByDevice[deviceId] ?? null,
+    cameraFields,
+  )
+
+  const result = {
+    ...(device as Device),
+    is_online: isDeviceActive(
+      (device as Device).last_seen,
+      latestRow?.created_at ?? null,
+    ),
+    latest: latestRow,
+  }
+
+  return NextResponse.json({ device: result })
+}
 
 export async function PATCH(
   req: Request,

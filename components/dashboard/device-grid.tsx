@@ -12,16 +12,11 @@ type DeviceWithLatest = Device & { latest: Telemetry | null }
 
 export function DeviceGrid({
   devices,
-  onCommand,
   onDelete,
   onRename,
   onReorder,
 }: {
   devices: DeviceWithLatest[]
-  onCommand: (
-    deviceId: string,
-    payload: Record<string, unknown>,
-  ) => Promise<void>
   onDelete?: (deviceId: string) => Promise<void>
   onRename?: (deviceId: string, name: string) => Promise<void>
   onReorder: (deviceIds: string[]) => Promise<void>
@@ -109,7 +104,6 @@ export function DeviceGrid({
 
             <DeviceCard
               device={device}
-              onCommand={onCommand}
               onDelete={onDelete}
               onRename={onRename}
               dragHandle={

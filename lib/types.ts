@@ -9,8 +9,50 @@ export type Device = {
   created_at: string;
 };
 
+export type MetricFormat =
+  | 'number'
+  | 'boolean'
+  | 'text'
+  | 'bytes'
+  | 'uptime'
+  | 'temperature'
+  | 'percent'
+  | 'rssi';
+
+export type MetricDef = {
+  /** Ключ в payload телеметрии */
+  key: string;
+  /** Альтернативные ключи (alias), например rssi / wifi_rssi */
+  keys?: string[];
+  /** Человекочитаемая подпись; если нет — выводится из key */
+  label?: string;
+  /** Единица измерения для отображения */
+  unit?: string;
+  /** Иконка: globe, signal, clock, memory, thermometer, droplets, battery, cpu, wifi, gauge */
+  icon?: string;
+  /** Формат значения */
+  format?: MetricFormat;
+  /** Группа на странице устройства */
+  group?: string;
+  /** Показывать на компактной карточке дашборда */
+  dashboard?: boolean;
+  /** Порядок сортировки */
+  order?: number;
+  /** Скрыть из UI (служебное поле) */
+  hidden?: boolean;
+};
+
+export type DashboardMetricsConfig = {
+  /** Явный список key метрик для дашборда (приоритет над dashboard: true) */
+  summary?: string[];
+  /** Максимум метрик на карточке */
+  max_items?: number;
+};
+
 export type DeviceMetadata = Record<string, unknown> & {
   commands?: CommandDef[];
+  metrics?: MetricDef[];
+  dashboard?: DashboardMetricsConfig;
   sort_order?: number;
 };
 
