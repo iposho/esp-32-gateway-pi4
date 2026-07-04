@@ -49,10 +49,16 @@ export type DashboardMetricsConfig = {
   max_items?: number;
 };
 
+export type DeviceFeatures = {
+  /** Публиковать прогресс OTA в телеметрию (по умолчанию true для новых устройств) */
+  ota_progress?: boolean;
+};
+
 export type DeviceMetadata = Record<string, unknown> & {
   commands?: CommandDef[];
   metrics?: MetricDef[];
   dashboard?: DashboardMetricsConfig;
+  features?: DeviceFeatures;
   sort_order?: number;
 };
 

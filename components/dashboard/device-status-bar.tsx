@@ -77,6 +77,20 @@ export function DeviceStatusBar({
       <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
         {timeAgo(lastSeen)}
       </span>
+      {otaStatus && (
+        <div className="w-full pt-1.5">
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-border/80">
+            <div
+              className={`h-full transition-all duration-500 ${
+                otaStatus === "failed" ? "bg-destructive" : "bg-primary"
+              }`}
+              style={{
+                width: `${Math.max(0, Math.min(100, otaProgress))}%`,
+              }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
