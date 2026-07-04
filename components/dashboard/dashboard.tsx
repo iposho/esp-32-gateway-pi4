@@ -2,8 +2,10 @@
 
 import { useCallback } from 'react'
 import useSWR from 'swr'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
+  Home,
   LogOut,
   RefreshCw,
   Radio,
@@ -131,14 +133,29 @@ export function Dashboard() {
       {/* ── Sticky header ── */}
       <header className="sticky top-0 z-10 border-b border-white/10 bg-background/70 backdrop-blur-2xl supports-[backdrop-filter]:bg-background/55">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
-          <div className="flex items-center gap-3">
+          <Link
+            href="/"
+            className="flex min-w-0 items-center gap-3 rounded-lg transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          >
             <BrandLogo size={36} />
-            <div>
-              <h1 className="text-base font-semibold leading-tight text-foreground">ESP32 Gateway</h1>
+            <div className="min-w-0">
+              <h1 className="text-base font-semibold leading-tight text-foreground">
+                ESP32 Gateway
+              </h1>
               <p className="text-xs text-muted-foreground">esp32.kuzyak.in</p>
             </div>
-          </div>
+          </Link>
           <div className="flex items-center gap-1.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              render={<Link href="/" />}
+              nativeButton={false}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <Home className="size-3.5" aria-hidden />
+              <span className="hidden sm:inline">Главная</span>
+            </Button>
             <Button
               variant="ghost"
               size="sm"
@@ -210,7 +227,7 @@ export function Dashboard() {
         {isLoading && devices.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 gap-3">
             <RefreshCw className="size-5 animate-spin text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">Загрузка списка устройств...</span>
+            <span className="text-sm text-muted-foreground">Загрузка списка устройств…</span>
           </div>
         ) : devices.length === 0 ? (
           <Card className="border-dashed bg-card/50 shadow-none">

@@ -33,14 +33,9 @@ import { toast } from "sonner";
 import { PinManagerModal } from "./pin-manager-modal";
 import { FileManagerModal } from "./file-manager-modal";
 
-type DeviceWithLatest = Device & { latest: Telemetry | null };
+import { getOtaStatus, uploadDeviceFirmware } from "@/lib/ota";
 
-const OTA_LABELS: Record<string, string> = {
-  downloading: "OTA: загрузка",
-  writing: "OTA: запись",
-  success: "OTA: готово",
-  failed: "OTA: ошибка",
-};
+type DeviceWithLatest = Device & { latest: Telemetry | null };
 
 export function DeviceDetailView({
   device,
@@ -76,14 +71,8 @@ export function DeviceDetailView({
   const metricGroups = getDetailMetricGroups(device.metadata, payload);
   const isCamera = hasCameraMetrics(payload);
 
-  const otaStatus = payload.ota as string | undefined;
-  const otaProgress =
-    typeof payload.progress === "number" ? payload.progress : 0;
-  const isOtaActive =
-    otaStatus && otaStatus !== "failed" && otaStatus !== "success";
-  const otaLabel = otaStatus
-    ? (OTA_LABELS[otaStatus] ?? `OTA: ${otaStatus}`)
-    : null;
+  const { otaStatus, otaProgress, isOtaActive, otaLabel } =
+    getOtaStatus(payload);
   const cameraReady = payload.camera_ready === true;
   const cameraStatusLabel =
     payload.camera_ready === true
@@ -214,20 +203,7 @@ export function DeviceDetailView({
 
     setIsUploading(true);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("deviceId", device.device_id);
-
-      const res = await fetch("/api/ota", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Ошибка загрузки");
-      }
-
+      await uploadDeviceFirmware(device.device_id, file);
       toast.success("Прошивка отправлена на устройство");
     } catch (err) {
       toast.error(
