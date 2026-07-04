@@ -100,7 +100,7 @@ export function Dashboard() {
             }
           }
 
-          return { devices: sortDevices(ordered) }
+          return { devices: ordered }
         },
         { revalidate: false },
       )
@@ -161,7 +161,7 @@ export function Dashboard() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
+      <main className="mx-auto max-w-7xl px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-8">
         <div className="mb-6 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
           <div>
             <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Панель</p>

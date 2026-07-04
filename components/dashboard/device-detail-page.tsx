@@ -121,7 +121,7 @@ export function DeviceDetailPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
+      <main className="mx-auto max-w-7xl px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-8">
         {error && (
           <Card className="mb-6 border-destructive/20 bg-destructive/10">
             <CardContent className="flex items-center gap-2 px-4 py-3 text-sm text-destructive">

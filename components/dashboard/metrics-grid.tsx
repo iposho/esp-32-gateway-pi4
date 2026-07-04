@@ -65,7 +65,7 @@ export function MetricsGrid({
           return (
             <div
               key={metric.def.key}
-              className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0"
+              className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
             >
               <div className="flex min-w-0 items-center gap-2">
                 <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/60 text-muted-foreground">
@@ -75,7 +75,7 @@ export function MetricsGrid({
                   {metric.label}
                 </span>
               </div>
-              <span className="shrink-0 text-right font-mono text-sm font-medium tabular-nums text-foreground">
+              <span className="shrink-0 pl-10 font-mono text-sm font-medium tabular-nums text-foreground sm:pl-0 sm:text-right">
                 {metric.formatted}
               </span>
             </div>

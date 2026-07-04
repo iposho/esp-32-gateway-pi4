@@ -247,7 +247,7 @@ export function DeviceDetailView({
   return (
     <>
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex min-w-0 items-start gap-3">
+        <div className="flex min-w-0 items-start gap-2 sm:gap-3">
           <Button
             variant="ghost"
             size="icon-sm"
@@ -275,7 +275,7 @@ export function DeviceDetailView({
               />
             ) : (
               <div className="group/name flex min-w-0 items-center gap-1">
-                <h1 className="truncate text-2xl font-semibold tracking-tight sm:text-3xl">
+                <h1 className="truncate text-xl font-semibold tracking-tight sm:text-3xl">
                   {device.name}
                 </h1>
                 {onRename && (
@@ -292,7 +292,7 @@ export function DeviceDetailView({
                 )}
               </div>
             )}
-            <p className="mt-1 font-mono text-sm text-muted-foreground">
+            <p className="mt-1 break-all font-mono text-xs text-muted-foreground sm:text-sm">
               {device.device_id}
             </p>
           </div>
@@ -302,7 +302,7 @@ export function DeviceDetailView({
           <Button
             variant="outline"
             size="sm"
-            className="shrink-0 border-destructive/30 text-destructive hover:bg-destructive/10"
+            className="w-full shrink-0 border-destructive/30 text-destructive hover:bg-destructive/10 sm:w-auto"
             onClick={handleDelete}
             disabled={isDeleting}
           >

@@ -35,3 +35,39 @@ export function reorderDeviceIds(
   next.splice(toIndex, 0, moved)
   return next
 }
+
+/** Применяет ручной порядок без повторной сортировки по online/имени */
+export function applyManualOrder<T extends Device>(
+  devices: T[],
+  deviceIds: string[],
+): T[] {
+  const byId = new Map(devices.map((d) => [d.device_id, d]))
+
+  return deviceIds
+    .map((id, index) => {
+      const device = byId.get(id)
+      if (!device) return null
+      return {
+        ...device,
+        metadata: { ...device.metadata, sort_order: index },
+      }
+    })
+    .filter((d): d is T => Boolean(d))
+}
+
+export function moveDeviceId(
+  deviceIds: string[],
+  deviceId: string,
+  direction: -1 | 1,
+): string[] | null {
+  const index = deviceIds.indexOf(deviceId)
+  const newIndex = index + direction
+  if (index === -1 || newIndex < 0 || newIndex >= deviceIds.length) {
+    return null
+  }
+
+  const next = [...deviceIds]
+  const [moved] = next.splice(index, 1)
+  next.splice(newIndex, 0, moved)
+  return next
+}

@@ -33,7 +33,9 @@ export function DeviceStatusBar({
 
   return (
     <div
-      className={`flex items-center justify-between gap-2 ${compact ? "py-0" : "border-b border-border/60 px-3 py-2"}`}
+      className={`flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 ${
+        compact ? "py-0" : "border-b border-border/60 px-3 py-2"
+      }`}
     >
       <div className="flex min-w-0 flex-wrap items-center gap-1.5">
         <Badge
