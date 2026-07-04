@@ -12,6 +12,10 @@ topic write devices/+/status
 topic write devices/+/telemetry
 topic write devices/+/capabilities
 topic read devices/+/command
+# Межустройственные топики (например flat → out/flamingo, read чужой telemetry)
+topic write devices/+/out/+
+topic read devices/+/out/+
+topic read devices/+/telemetry
 
 # --- Пользователь для бэкенда (Node-RED + админка) ---
 user backend
