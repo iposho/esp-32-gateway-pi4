@@ -4,7 +4,7 @@
     "type": "tab",
     "label": "ESP32 → Supabase",
     "disabled": false,
-    "info": "Подписка на MQTT и запись статусов/телеметрии в Supabase через PostgREST."
+    "info": "Подписка на MQTT и запись статусов/телеметрии/capabilities в Supabase через PostgREST."
   },
   {
     "id": "mosquitto-br",
@@ -69,6 +69,64 @@
     "wires": [["http-supabase"], ["http-touch"]]
   },
   {
+    "id": "mqtt-capabilities",
+    "type": "mqtt in",
+    "z": "esp32-tab",
+    "name": "devices/+/capabilities",
+    "topic": "devices/+/capabilities",
+    "qos": "1",
+    "broker": "mosquitto-br",
+    "x": 160,
+    "y": 300,
+    "wires": [["fn-capabilities"]]
+  },
+  {
+    "id": "fn-capabilities",
+    "type": "function",
+    "z": "esp32-tab",
+    "name": "build capabilities rpc call",
+    "func": "const deviceId = msg.topic.split('/')[1];\nlet capabilities = msg.payload;\nif (typeof capabilities === 'string') {\n  try { capabilities = JSON.parse(capabilities); } catch (e) { return null; }\n}\nif (!capabilities || !capabilities.commands || !Array.isArray(capabilities.commands)) {\n  return null;\n}\nmsg.headers = {\n  'Content-Type': 'application/json',\n  apikey: env.get('SERVICE_ROLE_KEY'),\n  Authorization: 'Bearer ' + env.get('SERVICE_ROLE_KEY'),\n};\nmsg.method = 'POST';\nmsg.url = env.get('SUPABASE_REST') + '/rpc/merge_device_commands';\nmsg.payload = {\n  p_device_id: deviceId,\n  p_commands: capabilities.commands,\n};\nreturn msg;",
+    "outputs": 1,
+    "x": 440,
+    "y": 300,
+    "wires": [["http-capabilities"]]
+  },
+  {
+    "id": "http-capabilities",
+    "type": "http request",
+    "z": "esp32-tab",
+    "name": "Supabase merge_device_commands",
+    "method": "use",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 720,
+    "y": 300,
+    "wires": [["dbg-cap"]]
+  },
+  {
+    "id": "dbg-cap",
+    "type": "debug",
+    "z": "esp32-tab",
+    "name": "capabilities result",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 920,
+    "y": 300,
+    "wires": []
+  },
+  {
     "id": "http-supabase",
     "type": "http request",
     "z": "esp32-tab",
@@ -119,8 +177,6 @@
     "tostatus": false,
     "complete": "payload",
     "targetType": "msg",
-    "statusVal": "",
-    "statusType": "auto",
     "x": 900,
     "y": 150,
     "wires": []
