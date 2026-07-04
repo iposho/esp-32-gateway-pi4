@@ -155,7 +155,9 @@ export function getDashboardMetrics(
     : defs.filter((d) => d.dashboard)
 
   const resolved = resolveMetrics(filtered, payload)
-  return resolved.slice(0, metadata.dashboard?.max_items ?? 4)
+  return resolved
+    .filter((m) => !CARD_PINNED_METRIC_KEYS.has(m.def.key))
+    .slice(0, metadata.dashboard?.max_items ?? 4)
 }
 
 /** Метрики для страницы устройства, сгруппированные по секциям */
@@ -189,7 +191,9 @@ const FALLBACK_DASHBOARD_DEFS: MetricDef[] = [
 ]
 
 function getFallbackDashboardMetrics(payload: Record<string, unknown>): ResolvedMetric[] {
-  return resolveMetrics(FALLBACK_DASHBOARD_DEFS, payload)
+  return resolveMetrics(FALLBACK_DASHBOARD_DEFS, payload).filter(
+    (m) => !CARD_PINNED_METRIC_KEYS.has(m.def.key),
+  )
 }
 
 function getFallbackDetailMetrics(payload: Record<string, unknown>): ResolvedMetric[] {
@@ -210,4 +214,92 @@ export function hasCameraMetrics(payload: Record<string, unknown>): boolean {
   return (
     payload.camera_ready !== undefined || payload.last_photo_url !== undefined
   )
+}
+
+/** Ключи метрик, которые всегда закреплены в шапке карточки дашборда */
+export const CARD_PINNED_METRIC_KEYS = new Set([
+  'ip',
+  'fw_version',
+  'fw_date',
+  'firmware_version',
+  'firmware_date',
+])
+
+const DEVICE_IP_KEYS = ['ip', 'local_ip', 'wifi_ip', 'ip_address'] as const
+
+/** IP-адрес из телеметрии — всегда показываем на карточке дашборда */
+export function getDeviceIp(payload: Record<string, unknown>): string | null {
+  const found = getPayloadValue(payload, [...DEVICE_IP_KEYS])
+  if (found?.value === undefined || found?.value === null) return null
+  const ip = String(found.value).trim()
+  return ip || null
+}
+
+const FIRMWARE_VERSION_KEYS = [
+  'fw_version',
+  'firmware_version',
+  'firmware',
+  'version',
+] as const
+
+const FIRMWARE_DATE_KEYS = [
+  'fw_date',
+  'firmware_date',
+  'fw_build',
+  'build_date',
+  'build_time',
+] as const
+
+function formatFirmwareDate(value: unknown): string {
+  if (value === null || value === undefined) return '—'
+
+  if (typeof value === 'number') {
+    const ms = value > 1e12 ? value : value * 1000
+    const date = new Date(ms)
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleDateString('ru-RU', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      })
+    }
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return '—'
+
+    const parsed = Date.parse(trimmed)
+    if (!Number.isNaN(parsed)) {
+      return new Date(parsed).toLocaleDateString('ru-RU', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      })
+    }
+
+    return trimmed
+  }
+
+  return String(value)
+}
+
+/** Версия и дата прошивки из телеметрии — всегда показываем на карточке дашборда */
+export function getFirmwareInfo(payload: Record<string, unknown>): {
+  version: string | null
+  date: string | null
+} {
+  const versionFound = getPayloadValue(payload, [...FIRMWARE_VERSION_KEYS])
+  const dateFound = getPayloadValue(payload, [...FIRMWARE_DATE_KEYS])
+
+  return {
+    version:
+      versionFound?.value !== undefined && versionFound?.value !== null
+        ? String(versionFound.value)
+        : null,
+    date:
+      dateFound?.value !== undefined && dateFound?.value !== null
+        ? formatFirmwareDate(dateFound.value)
+        : null,
+  }
 }

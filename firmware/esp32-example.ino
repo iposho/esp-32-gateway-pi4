@@ -67,7 +67,8 @@ const char *CAPABILITIES = R"({
     { "key": "rssi", "label": "Сигнал", "icon": "signal", "format": "rssi", "group": "Сеть", "dashboard": true, "order": 1 },
     { "key": "uptime", "label": "Аптайм", "icon": "clock", "format": "uptime", "group": "Система", "dashboard": true, "order": 2 },
     { "key": "heap", "keys": ["heap", "free_heap"], "label": "RAM", "icon": "memory", "format": "bytes", "group": "Система", "dashboard": true, "order": 3 },
-    { "key": "fw_version", "label": "Прошивка", "icon": "cpu", "group": "Система", "order": 10 }
+    { "key": "fw_version", "label": "Прошивка", "icon": "cpu", "group": "Система", "order": 10 },
+    { "key": "fw_date", "label": "Дата прошивки", "icon": "clock", "format": "text", "group": "Система", "order": 11 }
   ],
   "dashboard": {
     "summary": ["ip", "rssi", "uptime", "heap"],
@@ -79,6 +80,7 @@ const char *CAPABILITIES = R"({
 })";
 
 const char *FW_VERSION = "1.0.0";
+const char *FW_BUILD_DATE = __DATE__ " " __TIME__;
 
 unsigned long lastTelemetry = 0;
 bool otaInProgress = false;
@@ -218,6 +220,7 @@ void loop() {
     doc["heap"] = ESP.getFreeHeap();
     doc["ip"] = WiFi.localIP().toString();
     doc["fw_version"] = FW_VERSION;
+    doc["fw_date"] = FW_BUILD_DATE;
     publishTelemetryJson(doc);
   }
 }

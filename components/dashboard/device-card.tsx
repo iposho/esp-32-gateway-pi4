@@ -7,6 +7,8 @@ import {
   Camera,
   CameraOff,
   ChevronRight,
+  Cpu,
+  Globe,
   Pencil,
   Trash2,
 } from "lucide-react";
@@ -16,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DeviceStatusBar } from "./device-status-bar";
 import { MetricsGrid } from "./metrics-grid";
-import { getDashboardMetrics, hasCameraMetrics } from "@/lib/metrics";
+import { getDashboardMetrics, getDeviceIp, getFirmwareInfo, hasCameraMetrics } from "@/lib/metrics";
 import type { Device, Telemetry } from "@/lib/types";
 import { toast } from "sonner";
 
@@ -43,6 +45,8 @@ export function DeviceCard({
   const online = device.is_online;
   const payload = device.latest?.payload ?? {};
   const dashboardMetrics = getDashboardMetrics(device.metadata, payload);
+  const deviceIp = getDeviceIp(payload);
+  const firmware = getFirmwareInfo(payload);
   const isCamera = hasCameraMetrics(payload);
   const cameraReady = payload.camera_ready === true;
   const hasPhoto = Boolean(payload.last_photo_url);
@@ -198,6 +202,30 @@ export function DeviceCard({
             )}
             <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground/70">
               {device.device_id}
+            </p>
+            <p
+              className="mt-1 flex items-center gap-1.5 font-mono text-[11px] text-foreground/85"
+              title="IP-адрес"
+            >
+              <Globe className="size-3 shrink-0 text-muted-foreground/60" aria-hidden />
+              {deviceIp ?? "—"}
+            </p>
+            <p
+              className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[11px] text-muted-foreground/75"
+              title="Версия и дата прошивки"
+            >
+              <Cpu className="size-3 shrink-0 opacity-60" aria-hidden />
+              <span>
+                <span className="text-muted-foreground/55">v</span>
+                {firmware.version ?? "—"}
+              </span>
+              <span className="text-muted-foreground/35" aria-hidden>
+                ·
+              </span>
+              <span>
+                <span className="text-muted-foreground/55">от </span>
+                {firmware.date ?? "—"}
+              </span>
             </p>
           </div>
         </div>
