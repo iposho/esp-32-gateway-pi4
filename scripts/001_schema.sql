@@ -73,8 +73,24 @@ begin
   values (p_device_id, coalesce(p_name, p_device_id), now(), true)
   on conflict (device_id) do update
     set last_seen = now(),
-        is_online = true,
-        name = coalesce(public.devices.name, excluded.name);
+        is_online = true;
+end;
+$$;
+
+-- Статус online/offline без перезаписи name (Node-RED status flow)
+create or replace function public.set_device_status(
+  p_device_id text,
+  p_is_online boolean
+) returns void
+language plpgsql
+security definer
+as $$
+begin
+  insert into public.devices (device_id, name, last_seen, is_online)
+  values (p_device_id, p_device_id, now(), p_is_online)
+  on conflict (device_id) do update
+    set last_seen = now(),
+        is_online = p_is_online;
 end;
 $$;
 

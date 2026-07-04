@@ -11,6 +11,7 @@ export type Device = {
 
 export type DeviceMetadata = Record<string, unknown> & {
   commands?: CommandDef[];
+  sort_order?: number;
 };
 
 export type CommandDef = {

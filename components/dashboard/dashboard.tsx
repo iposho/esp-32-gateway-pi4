@@ -14,8 +14,9 @@ import {
 import { BrandLogo } from '@/components/brand-logo'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { DeviceCard } from './device-card'
+import { DeviceGrid } from './device-grid'
 import { CommandsReference } from './commands-reference'
+import { sortDevices } from '@/lib/device-order'
 import type { Device, Telemetry } from '@/lib/types'
 
 type DeviceWithLatest = Device & { latest: Telemetry | null }
@@ -31,10 +32,7 @@ export function Dashboard() {
   )
 
   const rawDevices = data?.devices ?? []
-  const devices = [...rawDevices].sort((a, b) => {
-    if (a.is_online === b.is_online) return 0
-    return a.is_online ? -1 : 1
-  })
+  const devices = sortDevices(rawDevices)
   const online = devices.filter((d) => d.is_online).length
 
   const sendCommand = useCallback(
@@ -65,6 +63,76 @@ export function Dashboard() {
       mutate()
     },
     [mutate]
+  )
+
+  const renameDevice = useCallback(
+    async (deviceId: string, name: string) => {
+      const res = await fetch(`/api/devices/${deviceId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        throw new Error(d.error ?? 'Ошибка переименования')
+      }
+      await mutate(
+        (current) =>
+          current
+            ? {
+                devices: current.devices.map((d) =>
+                  d.device_id === deviceId ? { ...d, name } : d,
+                ),
+              }
+            : current,
+        { revalidate: true },
+      )
+    },
+    [mutate],
+  )
+
+  const reorderDevices = useCallback(
+    async (deviceIds: string[]) => {
+      await mutate(
+        (current) => {
+          if (!current) return current
+
+          const byId = new Map(current.devices.map((d) => [d.device_id, d]))
+          const ordered = deviceIds
+            .map((id, index) => {
+              const device = byId.get(id)
+              if (!device) return null
+              return {
+                ...device,
+                metadata: { ...device.metadata, sort_order: index },
+              }
+            })
+            .filter((d): d is DeviceWithLatest => Boolean(d))
+
+          for (const device of current.devices) {
+            if (!deviceIds.includes(device.device_id)) {
+              ordered.push(device)
+            }
+          }
+
+          return { devices: sortDevices(ordered) }
+        },
+        { revalidate: false },
+      )
+
+      const res = await fetch('/api/devices/order', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceIds }),
+      })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        throw new Error(d.error ?? 'Ошибка сохранения порядка')
+      }
+
+      await mutate()
+    },
+    [mutate],
   )
 
   async function logout() {
@@ -170,11 +238,13 @@ export function Dashboard() {
             </CardContent>
           </Card>
         ) : (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {devices.map((d) => (
-              <DeviceCard key={d.id} device={d} onCommand={sendCommand} onDelete={deleteDevice} />
-            ))}
-          </div>
+          <DeviceGrid
+            devices={devices}
+            onCommand={sendCommand}
+            onDelete={deleteDevice}
+            onRename={renameDevice}
+            onReorder={reorderDevices}
+          />
         )}
 
         {/* ── Commands reference ── */}
