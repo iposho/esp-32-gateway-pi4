@@ -87,6 +87,8 @@ export type Command = {
   created_at: string;
 };
 
+export type { MqttEvent, MqttEventType } from './mqtt-events';
+
 /** Считаем устройство онлайн, если оно отметилось за последние N секунд */
 export const ONLINE_THRESHOLD_MS = 60_000;
 

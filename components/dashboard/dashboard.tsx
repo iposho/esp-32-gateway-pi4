@@ -2,18 +2,8 @@
 
 import { useCallback } from 'react'
 import useSWR from 'swr'
-import Link from 'next/link'
-import { useRouter } from 'next/navigation'
-import {
-  Home,
-  LogOut,
-  RefreshCw,
-  Radio,
-  Wifi,
-  WifiOff,
-  Activity,
-} from 'lucide-react'
-import { DashboardHeaderBrand } from '@/components/dashboard/dashboard-header-brand'
+import { RefreshCw, Radio, Wifi, WifiOff, Activity } from 'lucide-react'
+import { DashboardShell } from '@/components/dashboard/dashboard-shell'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { DeviceGrid } from './device-grid'
@@ -26,7 +16,6 @@ type DeviceWithLatest = Device & { latest: Telemetry | null }
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
 export function Dashboard() {
-  const router = useRouter()
   const { data, error, isLoading, mutate } = useSWR<{ devices: DeviceWithLatest[] }>(
     '/api/devices',
     fetcher,
@@ -122,51 +111,20 @@ export function Dashboard() {
     [mutate],
   )
 
-  async function logout() {
-    await fetch('/api/auth/logout', { method: 'POST' })
-    router.replace('/')
-    router.refresh()
-  }
-
   return (
-    <div className="min-h-screen">
-      {/* ── Sticky header ── */}
-      <header className="sticky top-0 z-10 border-b border-white/10 bg-background/70 backdrop-blur-2xl supports-[backdrop-filter]:bg-background/55">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
-          <DashboardHeaderBrand />
-          <div className="flex items-center gap-1.5">
-            <Button
-              variant="ghost"
-              size="sm"
-              render={<Link href="/" />}
-              nativeButton={false}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              <Home className="size-3.5" aria-hidden />
-              <span className="hidden sm:inline">Главная</span>
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => mutate()}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              <RefreshCw className={`size-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">Обновить</span>
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={logout}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              <LogOut className="size-3.5" />
-              <span className="hidden sm:inline">Выход</span>
-            </Button>
-          </div>
-        </div>
-      </header>
-
+    <DashboardShell
+      actions={
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => mutate()}
+          className="text-muted-foreground hover:text-foreground"
+        >
+          <RefreshCw className={`size-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+          <span className="hidden sm:inline">Обновить</span>
+        </Button>
+      }
+    >
       <main className="mx-auto max-w-7xl px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-8">
         <div className="mb-6 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
           <div>
@@ -245,7 +203,7 @@ export function Dashboard() {
           <CommandsReference />
         </div>
       </main>
-    </div>
+    </DashboardShell>
   )
 }
 

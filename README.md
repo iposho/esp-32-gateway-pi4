@@ -63,6 +63,9 @@ flowchart LR
 1. **Применить схему БД.** Выполни `scripts/001_schema.sql` в SQL-редакторе
    Supabase Studio (создаёт таблицы `devices`, `telemetry`, `commands`).
 
+   Для дашборда MQTT-трафика дополнительно выполни `scripts/004_mqtt_events.sql`
+   (таблица `mqtt_events`, Realtime, retention-функция `cleanup_mqtt_events`).
+
 2. **Узнать имя docker-сети** Supabase-стека:
    ```bash
    docker network ls | grep supabase
@@ -111,13 +114,34 @@ mosquitto_pub -h <IP_Pi> -p 1883 -u esp32 -P <pass> \
 2. Задай переменные окружения flow (передаются в контейнер из `.env`):
    `SERVICE_ROLE_KEY`, `SUPABASE_REST`.
 3. Импортируй `node-red/flows.example.json` (Menu → Import).
-4. Flow подписывается на `devices/+/status`, `devices/+/telemetry` и
-   `devices/+/capabilities`, преобразует payload и делает upsert/insert в Supabase
-   через PostgREST.
+4. Flow подписывается на `devices/+/status`, `devices/+/telemetry`,
+   `devices/+/capabilities` и `devices/#` (audit log → `mqtt_events`), преобразует
+   payload и делает upsert/insert в Supabase через PostgREST.
 5. Нажми **Deploy**.
 
 Проверка: опубликуй тестовое сообщение (см. выше) — в Debug-панели Node-RED
-появится ответ PostgREST, а в таблице `devices` — новая запись.
+появится ответ PostgREST, а в таблице `devices` — новая запись. Сообщение также
+появится в таблице `mqtt_events` и на странице `/dashboard/traffic`.
+
+**Retention audit log.** Таблица `mqtt_events` растёт с каждым MQTT-сообщением.
+Рекомендуется настроить автоочистку **через SQL** (pg_cron внутри Postgres):
+
+```sql
+-- Выполни scripts/005_mqtt_events_retention_cron.sql в Supabase Studio
+-- Проверка:
+SELECT jobid, jobname, schedule, command FROM cron.job WHERE jobname = 'cleanup-mqtt-events';
+```
+
+Ручной запуск (для теста): `SELECT public.cleanup_mqtt_events(7);`
+
+Альтернатива — системный cron на Pi, если pg_cron недоступен:
+
+```bash
+# crontab -e
+0 3 * * * docker exec -i supabase-db psql -U postgres -d postgres -c "SELECT public.cleanup_mqtt_events(7);"
+```
+
+Имя контейнера БД может отличаться — проверь `docker ps | grep db`.
 
 ---
 

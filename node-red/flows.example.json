@@ -180,5 +180,63 @@
     "x": 900,
     "y": 150,
     "wires": []
+  },
+  {
+    "id": "mqtt-all",
+    "type": "mqtt in",
+    "z": "esp32-tab",
+    "name": "devices/# (audit)",
+    "topic": "devices/#",
+    "qos": "0",
+    "broker": "mosquitto-br",
+    "x": 160,
+    "y": 420,
+    "wires": [["fn-mqtt-event"]]
+  },
+  {
+    "id": "fn-mqtt-event",
+    "type": "function",
+    "z": "esp32-tab",
+    "name": "build mqtt_events insert",
+    "func": "const parts = msg.topic.split('/');\nlet eventType = 'other';\nif (parts.length >= 3) {\n  const seg = parts[2];\n  if (['status','telemetry','command','capabilities'].includes(seg)) {\n    eventType = seg;\n  } else if (seg === 'out') {\n    eventType = 'out';\n  }\n}\nconst deviceId = parts.length >= 2 && parts[0] === 'devices' ? parts[1] : null;\nlet data = msg.payload;\nif (typeof data === 'string') {\n  try { data = JSON.parse(data); } catch (e) { data = { value: data }; }\n}\nif (typeof data !== 'object' || data === null) {\n  data = { value: data };\n}\nconst serialized = JSON.stringify(data);\nmsg.headers = {\n  'Content-Type': 'application/json',\n  apikey: env.get('SERVICE_ROLE_KEY'),\n  Authorization: 'Bearer ' + env.get('SERVICE_ROLE_KEY'),\n};\nmsg.method = 'POST';\nmsg.url = env.get('SUPABASE_REST') + '/mqtt_events';\nmsg.payload = [{\n  device_id: deviceId,\n  topic: msg.topic,\n  event_type: eventType,\n  payload: data,\n  payload_size: serialized.length,\n}];\nreturn msg;",
+    "outputs": 1,
+    "x": 430,
+    "y": 420,
+    "wires": [["http-mqtt-events"]]
+  },
+  {
+    "id": "http-mqtt-events",
+    "type": "http request",
+    "z": "esp32-tab",
+    "name": "Supabase mqtt_events",
+    "method": "use",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 720,
+    "y": 420,
+    "wires": [["dbg-mqtt-events"]]
+  },
+  {
+    "id": "dbg-mqtt-events",
+    "type": "debug",
+    "z": "esp32-tab",
+    "name": "mqtt_events result",
+    "active": false,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 930,
+    "y": 420,
+    "wires": []
   }
 ]
