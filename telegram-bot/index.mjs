@@ -113,12 +113,22 @@ mqttClient.on('message', (topic, payloadBuffer) => {
 
     if (device.statusSeen && previousStatus !== nextStatus) {
       const detail = payload && typeof payload === 'object' && typeof payload.error === 'string' && payload.error
-        ? `\n<code>${escapeHtml(payload.error)}</code>`
+        ? `
+🚨 <code>${escapeHtml(payload.error)}</code>`
         : ''
+
+      // Собираем краткую телеметрию в одну строку
+      const telem = device.telemetry ?? {}
+      const telemParts = []
+      if (telem.temperature !== undefined) telemParts.push(formatMetric({ key: 'temperature' }, telem.temperature))
+      if (telem.humidity !== undefined) telemParts.push(formatMetric({ key: 'humidity' }, telem.humidity))
+      if (telem.rssi !== undefined) telemParts.push(formatMetric({ key: 'rssi' }, telem.rssi))
+      const telemLine = telemParts.length > 0 ? `
+📊 ${telemParts.join('  ·  ')}` : ''
+
       void notifyAll(
-        `${statusEmoji(nextStatus)} <b>${escapeHtml(alias)}</b> — статус изменился\n` +
-        `${statusEmoji(previousStatus)} ${escapeHtml(previousStatus)} ` +
-        `${statusEmoji(nextStatus)} ${escapeHtml(nextStatus)}${detail}`
+        `${statusEmoji(nextStatus)} <b>${escapeHtml(alias)}</b>${detail}${telemLine}`,
+        deviceKeyboard(device),
       )
     } else if (wasUnresponsive && nextStatus === 'online') {
           const silenceDuration = device._unresponsiveSince
@@ -1089,9 +1099,9 @@ function isAllowed(chatId) {
   return allowedChatIds.has(chatId)
 }
 
-async function notifyAll(text) {
+async function notifyAll(text, replyMarkup) {
   for (const chatId of allowedChatIds) {
-    await sendMessage(chatId, text)
+    await sendMessage(chatId, text, replyMarkup)
     await sleep(100)
   }
 }
