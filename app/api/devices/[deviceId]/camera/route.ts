@@ -53,11 +53,12 @@ export async function GET(
   try {
     // Проксируем запрос к локальному IP-адресу камеры
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 10000) // 10s timeout
+    const timeoutId = setTimeout(() => controller.abort(), 8000) // 8s timeout
     
-    const response = await fetch(url, { 
+    const response = await fetch(url, {
       cache: 'no-store',
-      signal: controller.signal
+      signal: controller.signal,
+      headers: { Accept: 'image/jpeg' },
     })
     
     clearTimeout(timeoutId)
@@ -79,6 +80,11 @@ export async function GET(
       },
     })
   } catch (e) {
+    const isTimeout = e instanceof DOMException && e.name === 'AbortError'
+    if (isTimeout) {
+      console.error(`[Camera Proxy] Timeout fetching ${url} (8s elapsed) — camera may be offline`)
+      return new NextResponse('Camera did not respond in time', { status: 504 })
+    }
     console.error(`[Camera Proxy] Fetch error for URL ${url}:`, e)
     return new NextResponse('Failed to connect to camera', { status: 502 })
   }

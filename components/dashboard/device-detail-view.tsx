@@ -60,6 +60,8 @@ export function DeviceDetailView({
   const [isDeleting, setIsDeleting] = useState(false);
   const [imgTimestamp, setImgTimestamp] = useState(Date.now());
   const [imgLoading, setImgLoading] = useState(false);
+  const [imgError, setImgError] = useState(false);
+  const imgRetryRef = useRef(0);
   const [isUploading, setIsUploading] = useState(false);
   const [isPinModalOpen, setIsPinModalOpen] = useState(false);
   const [isFileModalOpen, setIsFileModalOpen] = useState(false);
@@ -85,6 +87,8 @@ export function DeviceDetailView({
   useEffect(() => {
     if (payload.capture_count) {
       setImgTimestamp(Date.now());
+      setImgError(false);
+      imgRetryRef.current = 0;
     }
   }, [payload.capture_count]);
 
@@ -175,6 +179,8 @@ export function DeviceDetailView({
 
   function refreshPhoto() {
     setImgLoading(true);
+    setImgError(false);
+    imgRetryRef.current = 0;
     setImgTimestamp(Date.now());
   }
 
@@ -363,15 +369,28 @@ export function DeviceDetailView({
                     <CameraOff className="size-10 opacity-40" />
                     <span className="text-sm">Камера офлайн</span>
                   </div>
-                ) : payload.last_photo_url ? (
+                ) : payload.last_photo_url && !imgError ? (
                   <div className="flex aspect-video items-center justify-center bg-black/5 dark:bg-black/20">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={`/api/devices/${device.device_id}/camera?t=${imgTimestamp}`}
                       alt="Camera snapshot"
                       className={`h-full w-full object-contain transition-opacity duration-300 ${imgLoading ? "opacity-50" : "opacity-100"}`}
-                      onLoad={() => setImgLoading(false)}
-                      onError={() => setImgLoading(false)}
+                      onLoad={() => {
+                        setImgLoading(false);
+                        setImgError(false);
+                        imgRetryRef.current = 0;
+                      }}
+                      onError={() => {
+                        setImgLoading(false);
+                        setImgError(true);
+                        // Auto-retry up to 2 times with exponential backoff
+                        if (imgRetryRef.current < 2) {
+                          imgRetryRef.current++;
+                          const delay = 2000 * Math.pow(2, imgRetryRef.current - 1);
+                          setTimeout(() => refreshPhoto(), delay);
+                        }
+                      }}
                     />
                   </div>
                 ) : (

@@ -39,7 +39,7 @@ export async function GET() {
 
   try {
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 10_000)
+    const timeoutId = setTimeout(() => controller.abort(), 8_000)
 
     const response = await fetch(url, {
       cache: 'no-store',
@@ -50,10 +50,12 @@ export async function GET() {
     clearTimeout(timeoutId)
 
     if (!response.ok) {
+      console.error(`[Camera Latest] Camera returned status ${response.status} ${response.statusText}`)
       return new NextResponse('Error fetching image from camera', { status: 502 })
     }
 
     const imageBuffer = await response.arrayBuffer()
+    console.log(`[Camera Latest] Successfully fetched image, size: ${imageBuffer.byteLength} bytes`)
 
     return new NextResponse(imageBuffer, {
       status: 200,
@@ -65,7 +67,13 @@ export async function GET() {
         'X-Timestamp': t.created_at,
       },
     })
-  } catch {
+  } catch (e) {
+    const isTimeout = e instanceof DOMException && e.name === 'AbortError'
+    if (isTimeout) {
+      console.error(`[Camera Latest] Timeout fetching ${url} (8s elapsed) — camera may be offline`)
+      return new NextResponse('Camera did not respond in time', { status: 504 })
+    }
+    console.error(`[Camera Latest] Fetch error for URL ${url}:`, e)
     return new NextResponse('Failed to connect to camera', { status: 502 })
   }
 }
