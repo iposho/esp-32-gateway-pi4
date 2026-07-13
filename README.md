@@ -270,10 +270,28 @@ esp32.kuzyak.in {
 
 ## 7. Прошивка ESP32
 
-Пример — `firmware/esp32-example.ino` (PubSubClient + ArduinoJson):
-- публикует `online` при подключении, `offline` через LWT при обрыве;
-- шлёт телеметрию (uptime, RSSI, heap) каждые 10 с;
-- слушает `devices/<id>/command` и выполняет команды (пример: реле).
+Примеры в `firmware/`:
+
+- **`esp32-example.ino`** — базовая заготовка (PubSubClient + ArduinoJson):
+  - публикует `online` при подключении, `offline` через LWT при обрыве;
+  - шлёт телеметрию (uptime, RSSI, heap) каждые 10 с;
+  - слушает `devices/<id>/command` и выполняет команды (пример: реле).
+
+- **`esp32-bedroom.ino`** — управление Camelion WiFi-лампой через KY-040 энкодер:
+  - KY-040: CLK→GPIO25, DT→GPIO26, SW→GPIO27, INPUT_PULLUP, с автоускорением;
+  - поворот → яркость, нажатие → вкл/выкл, удержание+поворот → цветовая температура;
+  - MQTT-команды: `camelion_power`, `camelion_brightness`, `camelion_temp`, `reboot`;
+  - relay-топик `devices/esp32-bedroom/out/camelion` → Python-мост на RPi;
+  - телеметрия сразу после смены состояния + каждые 10 с;
+  - LED (GPIO 2) выключен по умолчанию.
+
+- **`camelion_bridge.py`** — Python-мост для управления Tuya-лампой через Cloud API:
+  - подписывается на `devices/esp32-bedroom/out/camelion`;
+  - управляет лампой через `tinytuya.Cloud`;
+  - публикует состояние лампы в `devices/camelion/telemetry` (retained);
+  - опрашивает лампу раз в 60 с.
+
+Каждый скетч сам декларирует свои команды и метрики через retained-топик `devices/<id>/capabilities`.
 
 ---
 
@@ -308,7 +326,8 @@ docker-compose.yml       # единый стек
 | `devices/<id>/status` | ESP32 → | `{"status":"online"}` (retained + LWT) |
 | `devices/<id>/telemetry` | ESP32 → | `{"uptime":123,"rssi":-60,"heap":40000}`<br>`{"ota":"downloading","progress":40}` |
 | `devices/<id>/capabilities` | ESP32 → | `{"commands":[{"action":"led","title":"Свет","type":"toggle"}]}` (retained) |
-| `devices/<id>/command` | → ESP32 | `{"action":"led","value":true}`<br>`{"action":"capture"}`<br>`{"action":"reboot"}`<br>`{"action":"pin_read","pin":32}`<br>`{"action":"pin_write","pin":2,"value":1}`<br>`{"action":"ota","url":"http://..."}` |
+| `devices/<id>/out/camelion` | ESP32 → | `{"action":"power","value":1}` — relay на Python-мост (RPi) |
+| `devices/<id>/command` | → ESP32 | `{"action":"led","value":true}`<br>`{"action":"capture"}`<br>`{"action":"reboot"}`<br>`{"action":"pin_read","pin":32}`<br>`{"action":"pin_write","pin":2,"value":1}`<br>`{"action":"camelion_power","value":true}`<br>`{"action":"camelion_brightness","value":75}`<br>`{"action":"camelion_temp","value":30}`<br>`{"action":"ota","url":"http://..."}` |
 
 ---
 

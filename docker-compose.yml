@@ -101,6 +101,26 @@ services:
     networks:
       - esp32-internal
 
+  camelion-bridge:
+    build:
+      context: ./camelion-bridge
+      dockerfile: Dockerfile
+    container_name: esp32-camelion-bridge
+    restart: unless-stopped
+    environment:
+      MQTT_BROKER: mosquitto
+      MQTT_PORT: 1883
+      MQTT_USER: esp32
+      MQTT_PASS: ${CAMELION_MQTT_PASS:-}
+      TUYA_ACCESS_ID: ${TUYA_ACCESS_ID:-}
+      TUYA_ACCESS_SECRET: ${TUYA_ACCESS_SECRET:-}
+      TUYA_DEVICE_ID: ${TUYA_DEVICE_ID:-}
+      TUYA_REGION: ${TUYA_REGION:-eu}
+    depends_on:
+      - mosquitto
+    networks:
+      - esp32-internal
+
 volumes:
   mosquitto-data:
   mosquitto-log:
