@@ -460,7 +460,7 @@ void initMqttTopics() {
 
   mqttClient.setServer(MQTT_HOST, MQTT_PORT);
   mqttClient.setCallback(handleMqttCommand);
-  mqttClient.setBufferSize(1024);
+  mqttClient.setBufferSize(2560);
   mqttTopicsReady = true;
 }
 
