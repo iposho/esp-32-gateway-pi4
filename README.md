@@ -309,3 +309,33 @@ docker-compose.yml       # единый стек
 | `devices/<id>/telemetry` | ESP32 → | `{"uptime":123,"rssi":-60,"heap":40000}`<br>`{"ota":"downloading","progress":40}` |
 | `devices/<id>/capabilities` | ESP32 → | `{"commands":[{"action":"led","title":"Свет","type":"toggle"}]}` (retained) |
 | `devices/<id>/command` | → ESP32 | `{"action":"led","value":true}`<br>`{"action":"capture"}`<br>`{"action":"reboot"}`<br>`{"action":"pin_read","pin":32}`<br>`{"action":"pin_write","pin":2,"value":1}`<br>`{"action":"ota","url":"http://..."}` |
+
+---
+
+## FAQ
+
+### 🖼️ Камера не показывает снимок (AbortError / 504)
+
+Симптом: в логах `[Camera Proxy] Fetch error — AbortError`, браузер показывает
+битую иконку вместо снимка.
+
+**Причина:** ESP32-CAM и сервер (Raspberry Pi) оказались в разных подсетях.
+Сервер не мог достучаться до камеры по IP.
+
+**Решение:** подключить Raspberry Pi к той же WiFi-сети, что и ESP32-CAM
+(или наоборот — настроить камеру на сеть сервера). После этого снимки
+начинают приходить нормально.
+
+### 📡 Telegram-бот не отвечает на команды
+
+1. Проверь, что `TELEGRAM_BOT_TOKEN` в `.env` корректный.
+2. Убедись, что твой `chat_id` добавлен в `TELEGRAM_ALLOWED_CHAT_IDS`.
+3. Проверь логи: `docker compose logs telegram-bot`.
+4. Бот использует long polling — порты открывать не нужно.
+
+### 🔌 Устройство не появляется в админке
+
+1. Проверь, что ESP32 подключено к MQTT-брокеру (лог прошивки).
+2. Проверь Mosquitto: `docker compose logs mosquitto`.
+3. Проверь Node-RED: открыть `http://<IP_Pi>:1880`, посмотреть Debug-панель.
+4. Убедись, что в таблице `devices` появилась запись с `device_id`.
