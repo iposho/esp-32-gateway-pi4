@@ -225,14 +225,36 @@ export const CARD_PINNED_METRIC_KEYS = new Set([
   'firmware_date',
 ])
 
-const DEVICE_IP_KEYS = ['ip', 'local_ip', 'wifi_ip', 'ip_address'] as const
+const DEVICE_IP_KEYS = [
+  'ip',
+  'local_ip',
+  'wifi_ip',
+  'sta_ip',
+  'eth_ip',
+  'ip_address',
+  'network_ip',
+] as const
 
 /** IP-адрес из телеметрии — всегда показываем на карточке дашборда */
 export function getDeviceIp(payload: Record<string, unknown>): string | null {
   const found = getPayloadValue(payload, [...DEVICE_IP_KEYS])
-  if (found?.value === undefined || found?.value === null) return null
-  const ip = String(found.value).trim()
-  return ip || null
+  if (found?.value !== undefined && found?.value !== null) {
+    const ip = String(found.value).trim()
+    if (ip) return ip
+  }
+
+  const nested = (payload.network ?? payload.wifi ?? payload.net) as
+    | Record<string, unknown>
+    | undefined
+  if (nested && typeof nested === 'object') {
+    const nestedFound = getPayloadValue(nested, [...DEVICE_IP_KEYS])
+    if (nestedFound?.value !== undefined && nestedFound?.value !== null) {
+      const ip = String(nestedFound.value).trim()
+      if (ip) return ip
+    }
+  }
+
+  return null
 }
 
 const FIRMWARE_VERSION_KEYS = [

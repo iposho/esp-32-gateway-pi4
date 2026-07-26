@@ -72,18 +72,17 @@ export function Dashboard() {
       await mutate(
         (current) => {
           if (!current) return current
-
           const byId = new Map(current.devices.map((d) => [d.device_id, d]))
-          const ordered = deviceIds
-            .map((id, index) => {
-              const device = byId.get(id)
-              if (!device) return null
-              return {
+          const ordered: DeviceWithLatest[] = []
+          for (let index = 0; index < deviceIds.length; index++) {
+            const device = byId.get(deviceIds[index])
+            if (device) {
+              ordered.push({
                 ...device,
                 metadata: { ...device.metadata, sort_order: index },
-              }
-            })
-            .filter((d): d is DeviceWithLatest => Boolean(d))
+              })
+            }
+          }
 
           for (const device of current.devices) {
             if (!deviceIds.includes(device.device_id)) {

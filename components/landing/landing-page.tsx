@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { BrandLogo } from '@/components/brand-logo'
+import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 
 const GITHUB_REPO = 'https://github.com/iposho/esp-32-gateway-pi4'
@@ -29,7 +30,7 @@ function InlineCode({ children }: { children: ReactNode }) {
 
 function CodeBlock({ children }: { children: string }) {
   return (
-    <pre className="overflow-x-auto rounded-xl border border-[#d0d7de]/80 bg-[#f6f8fa]/80 px-4 py-3 font-mono text-[13px] leading-relaxed text-[#1f2328] backdrop-blur-sm">
+    <pre className="overflow-x-auto rounded-xl border border-[#d0d7de]/80 bg-[#1f2328] p-4 text-[13px] leading-relaxed text-[#e6edf3]">
       <code translate="no">{children}</code>
     </pre>
   )
@@ -45,7 +46,7 @@ function GlassPanel({
   return (
     <div
       className={cn(
-        'rounded-2xl border border-white/70 bg-white/50 shadow-[0_20px_40px_rgba(0,0,0,0.06)] backdrop-blur-xl',
+        'rounded-2xl border border-white/70 bg-white/55 shadow-[0_12px_40px_rgba(0,0,0,0.04)] backdrop-blur-xl supports-[backdrop-filter]:bg-white/45',
         className,
       )}
     >
@@ -58,7 +59,7 @@ function SectionTitle({ id, children }: { id: string; children: ReactNode }) {
   return (
     <h2
       id={id}
-      className="scroll-mt-24 mb-4 border-b border-[#d8dee4]/80 pb-2 text-2xl font-semibold text-pretty text-[#1f2328]"
+      className="mb-4 text-base font-semibold tracking-tight text-[#1f2328]"
     >
       {children}
     </h2>
@@ -67,8 +68,8 @@ function SectionTitle({ id, children }: { id: string; children: ReactNode }) {
 
 function GhTable({ children }: { children: ReactNode }) {
   return (
-    <div className="mb-4 overflow-x-auto overscroll-x-contain rounded-xl border border-[#d0d7de]/70">
-      <table className="w-full min-w-[480px] border-collapse text-left text-sm">
+    <div className="overflow-x-auto rounded-xl border border-[#d0d7de]/80 bg-white/75 shadow-sm backdrop-blur-sm">
+      <table className="w-full text-left text-xs leading-6 text-[#1f2328]">
         {children}
       </table>
     </div>
@@ -85,44 +86,32 @@ function LandingReveal({
   eager?: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)
-  const [visible, setVisible] = useState(eager)
+  const [shown, setShown] = useState(false)
 
   useEffect(() => {
-    if (eager) return
-
     const el = ref.current
     if (!el) return
-
-    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    if (reduced) {
-      setVisible(true)
-      return
-    }
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setVisible(true)
-          observer.disconnect()
+    const ob = new IntersectionObserver(
+      ([e]) => {
+        if (e.isIntersecting) {
+          setShown(true)
+          ob.unobserve(el)
         }
       },
-      { threshold: 0.08, rootMargin: '0px 0px -5% 0px' },
+      { threshold: 0.08 },
     )
-
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [eager])
+    ob.observe(el)
+    return () => ob.disconnect()
+  }, [])
 
   return (
     <div
       ref={ref}
+      style={{ transitionDelay: `${delay}ms` }}
       className={cn(
-        'motion-safe:transition-[opacity,transform] motion-safe:duration-700 motion-safe:ease-out motion-reduce:transition-none',
-        visible
-          ? 'translate-y-0 opacity-100'
-          : 'translate-y-5 opacity-0 motion-reduce:translate-y-0 motion-reduce:opacity-100',
+        'transition-all duration-700 ease-out',
+        shown ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0',
       )}
-      style={{ transitionDelay: visible ? `${delay}ms` : '0ms' }}
     >
       {children}
     </div>
@@ -133,7 +122,7 @@ function NavLink({ href, children }: { href: string; children: ReactNode }) {
   return (
     <a
       href={href}
-      className="block rounded-lg px-2 py-1.5 text-sm text-[#656d76] no-underline transition-colors hover:bg-white/60 hover:text-[#0969da] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0969da]/40"
+      className="block rounded-lg px-2.5 py-1.5 text-xs text-[#656d76] transition-colors hover:bg-black/5 hover:text-[#1f2328]"
     >
       {children}
     </a>
@@ -143,21 +132,19 @@ function NavLink({ href, children }: { href: string; children: ReactNode }) {
 function ActionLink({
   href,
   children,
-  external = false,
   primary = false,
+  external = false,
 }: {
   href: string
   children: ReactNode
-  external?: boolean
   primary?: boolean
+  external?: boolean
 }) {
   const className = cn(
-    'inline-flex touch-manipulation items-center rounded-xl border px-3.5 py-2 text-sm font-medium no-underline',
-    'transition-[background-color,border-color,color,box-shadow] duration-300 ease-out',
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0969da]/45 focus-visible:ring-offset-2 focus-visible:ring-offset-[#f6f8fa]',
+    'inline-flex items-center justify-center rounded-xl px-3.5 py-2 text-xs font-semibold no-underline transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2',
     primary
-      ? 'border-[#0969da]/30 bg-[#0969da] text-white shadow-[0_12px_28px_rgba(9,105,218,0.22)] hover:bg-[#0550ae]'
-      : 'border-[#d0d7de]/80 bg-white/55 text-[#1f2328] shadow-[0_8px_24px_rgba(0,0,0,0.04)] backdrop-blur-sm hover:border-[#0969da]/25 hover:bg-white/80',
+      ? 'border border-[#0969da]/30 bg-gradient-to-b from-[#0969da] to-[#044289] text-white shadow-[0_8px_20px_rgba(9,105,218,0.25)] hover:brightness-110 focus-visible:ring-[#0969da]'
+      : 'border border-white/80 bg-white/70 text-[#1f2328] shadow-[0_4px_16px_rgba(0,0,0,0.04)] backdrop-blur-md hover:bg-white focus-visible:ring-[#0969da]',
   )
 
   if (external) {
@@ -181,6 +168,15 @@ function ActionLink({
 }
 
 export function LandingPage() {
+  const [isLoggedIn, setIsLoggedIn] = useState(false)
+
+  useEffect(() => {
+    const supabase = createClient()
+    supabase.auth.getUser().then(({ data }) => {
+      if (data.user) setIsLoggedIn(true)
+    })
+  }, [])
+
   return (
     <div className="relative min-h-screen overflow-x-hidden bg-[#eef2f7] text-left text-[#1f2328] antialiased [color-scheme:light]">
       <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
@@ -188,13 +184,6 @@ export function LandingPage() {
         <div className="absolute right-[-10%] top-[18%] size-[22rem] rounded-full bg-[#38bdf8]/14 blur-3xl" />
         <div className="absolute bottom-[-8%] left-[35%] size-[26rem] rounded-full bg-[#0969da]/8 blur-3xl" />
       </div>
-
-      <a
-        href="#content"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-white focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-[#0969da] focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-[#0969da]/40"
-      >
-        Перейти к содержимому
-      </a>
 
       <header className="sticky top-0 z-20 border-b border-white/50 bg-white/60 shadow-[0_8px_32px_rgba(0,0,0,0.04)] backdrop-blur-xl supports-[backdrop-filter]:bg-white/45">
         <div className="mx-auto flex max-w-[1100px] items-center justify-between gap-4 px-4 py-3 sm:px-6">
@@ -223,8 +212,8 @@ export function LandingPage() {
             <ActionLink href={GITHUB_REPO} external>
               GitHub
             </ActionLink>
-            <ActionLink href="/login" primary>
-              Войти
+            <ActionLink href={isLoggedIn ? "/dashboard" : "/login"} primary>
+              {isLoggedIn ? "Панель управления" : "Войти"}
             </ActionLink>
           </nav>
         </div>
@@ -292,8 +281,8 @@ export function LandingPage() {
               </div>
 
               <div className="flex flex-wrap gap-3">
-                <ActionLink href="/login" primary>
-                  Открыть панель
+                <ActionLink href={isLoggedIn ? "/dashboard" : "/login"} primary>
+                  {isLoggedIn ? "Перейти в панель" : "Открыть панель"}
                 </ActionLink>
                 <ActionLink href={GITHUB_REPO} external>
                   GitHub →

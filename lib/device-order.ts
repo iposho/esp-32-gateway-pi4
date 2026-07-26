@@ -36,23 +36,23 @@ export function reorderDeviceIds(
   return next
 }
 
-/** Применяет ручной порядок без повторной сортировки по online/имени */
 export function applyManualOrder<T extends Device>(
   devices: T[],
   deviceIds: string[],
 ): T[] {
   const byId = new Map(devices.map((d) => [d.device_id, d]))
+  const list: T[] = []
 
-  return deviceIds
-    .map((id, index) => {
-      const device = byId.get(id)
-      if (!device) return null
-      return {
+  for (const id of deviceIds) {
+    const device = byId.get(id)
+    if (device) {
+      list.push({
         ...device,
-        metadata: { ...device.metadata, sort_order: index },
-      }
-    })
-    .filter((d): d is T => Boolean(d))
+        metadata: { ...device.metadata, sort_order: list.length },
+      })
+    }
+  }
+  return list
 }
 
 export function moveDeviceId(

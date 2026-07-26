@@ -95,7 +95,7 @@ export function DeviceDetailPage() {
             <Button
               variant="ghost"
               size="sm"
-              render={<Link href="/" />}
+              render={<Link href="/dashboard" />}
               nativeButton={false}
               className="text-muted-foreground hover:text-foreground"
             >

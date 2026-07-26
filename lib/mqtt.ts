@@ -45,10 +45,33 @@ export function publishCommand(
 
     if (c.connected) {
       doPublish()
-    } else {
-      c.once('connect', doPublish)
-      c.once('error', (err) => reject(err))
-      setTimeout(() => reject(new Error('MQTT connect timeout')), 6000)
+      return
     }
+
+    let timer: NodeJS.Timeout | null = null
+
+    const cleanup = () => {
+      if (timer) clearTimeout(timer)
+      c.removeListener('connect', onConnect)
+      c.removeListener('error', onError)
+    }
+
+    const onConnect = () => {
+      cleanup()
+      doPublish()
+    }
+
+    const onError = (err: Error) => {
+      cleanup()
+      reject(err)
+    }
+
+    c.once('connect', onConnect)
+    c.once('error', onError)
+
+    timer = setTimeout(() => {
+      cleanup()
+      reject(new Error('MQTT connect timeout'))
+    }, 6000)
   })
 }

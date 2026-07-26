@@ -16,6 +16,8 @@ import {
   FolderOpen,
   ArrowLeft,
   Activity,
+  ChevronDown,
+  CheckCircle2,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -89,6 +91,12 @@ export function DeviceDetailView({
   const [draftName, setDraftName] = useState(device.name);
   const [isSavingName, setIsSavingName] = useState(false);
   const [toggles, setToggles] = useState<Record<string, boolean>>({});
+  const [collapsedGroups, setCollapsedGroups] = useState<
+    Record<string, boolean>
+  >({});
+  const [ackedCommands, setAckedCommands] = useState<Record<string, boolean>>(
+    {},
+  );
   const [isDeleting, setIsDeleting] = useState(false);
   const [imgTimestamp, setImgTimestamp] = useState(Date.now());
   const [imgLoading, setImgLoading] = useState(false);
@@ -115,9 +123,16 @@ export function DeviceDetailView({
       for (const cmd of sketchCommands) {
         if (cmd.type === "toggle") {
           const teleVal = getPayloadToggleValue(payload, cmd.action);
-          if (teleVal !== undefined && prev[cmd.action] !== teleVal) {
-            next[cmd.action] = teleVal;
-            changed = true;
+          if (teleVal !== undefined) {
+            if (prev[cmd.action] !== teleVal) {
+              next[cmd.action] = teleVal;
+              changed = true;
+            }
+            setAckedCommands((ackPrev) =>
+              ackPrev[cmd.action]
+                ? ackPrev
+                : { ...ackPrev, [cmd.action]: true },
+            );
           }
         }
       }
@@ -199,6 +214,7 @@ export function DeviceDetailView({
     revertVal?: boolean,
   ) {
     setSending(key);
+    setAckedCommands((prev) => ({ ...prev, [key]: false }));
     try {
       await onCommand(device.device_id, payload);
       toast.success("Команда отправлена");
@@ -388,14 +404,34 @@ export function DeviceDetailView({
                 </div>
               </div>
 
-              {metricGroups.map(({ group, metrics }) => (
-                <section key={group} className="mt-6 first:mt-0">
-                  <h2 className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                    {group}
-                  </h2>
-                  <MetricsGrid metrics={metrics} variant="detail" />
-                </section>
-              ))}
+              {metricGroups.map(({ group, metrics }) => {
+                const isCollapsed = collapsedGroups[group] ?? false;
+                return (
+                  <section key={group} className="mt-6 first:mt-0">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCollapsedGroups((prev) => ({
+                          ...prev,
+                          [group]: !isCollapsed,
+                        }))
+                      }
+                      className="mb-3 flex w-full items-center justify-between text-left text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        {group}
+                        <span className="rounded-full bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                          {metrics.length}
+                        </span>
+                      </span>
+                      <ChevronDown
+                        className={`size-3.5 transition-transform duration-200 ${isCollapsed ? "-rotate-90" : ""}`}
+                      />
+                    </button>
+                    {!isCollapsed && <MetricsGrid metrics={metrics} variant="detail" />}
+                  </section>
+                );
+              })}
             </div>
           </Card>
 
@@ -529,6 +565,8 @@ export function DeviceDetailView({
                     getPayloadToggleValue(payload, cmd.action) ??
                     false;
                   const isSending = sending === cmd.action;
+                  const isAcked = ackedCommands[cmd.action] === true;
+
                   return (
                     <Button
                       key={cmd.action}
@@ -536,12 +574,25 @@ export function DeviceDetailView({
                       variant={isToggle && toggleValue ? "default" : "outline"}
                       disabled={!online || sending !== null}
                       onClick={() => handleSketchCommand(cmd)}
-                      className="h-10 justify-start"
+                      className="h-10 justify-between gap-2"
                     >
-                      <Icon
-                        className={`size-3.5 ${cmd.type === "trigger" && isSending ? "animate-spin" : ""}`}
-                      />
-                      {isSending ? "…" : cmd.title}
+                      <span className="flex min-w-0 items-center gap-2 truncate">
+                        <Icon
+                          className={`size-3.5 shrink-0 ${cmd.type === "trigger" && isSending ? "animate-spin" : ""}`}
+                        />
+                        <span className="truncate">
+                          {isSending ? "…" : cmd.title}
+                        </span>
+                      </span>
+                      {isAcked && !isSending && (
+                        <span
+                          className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[10px] font-medium text-emerald-500"
+                          title="Подтверждено устройством"
+                        >
+                          <CheckCircle2 className="size-3" />
+                          <span className="hidden sm:inline">ACK</span>
+                        </span>
+                      )}
                     </Button>
                   );
                 })}
