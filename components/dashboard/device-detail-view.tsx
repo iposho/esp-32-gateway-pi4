@@ -37,6 +37,38 @@ import { getOtaStatus, uploadDeviceFirmware } from "@/lib/ota";
 
 type DeviceWithLatest = Device & { latest: Telemetry | null };
 
+function getPayloadToggleValue(
+  payload: Record<string, unknown> | undefined,
+  action: string,
+): boolean | undefined {
+  if (!payload) return undefined;
+
+  const raw = payload[action];
+  if (typeof raw === "boolean") return raw;
+  if (typeof raw === "number") return raw !== 0;
+  if (typeof raw === "string") {
+    const l = raw.toLowerCase().trim();
+    if (l === "true" || l === "1" || l === "on") return true;
+    if (l === "false" || l === "0" || l === "off") return false;
+  }
+
+  for (const [key, val] of Object.entries(payload)) {
+    const k = key.toLowerCase();
+    const act = action.toLowerCase();
+    if (k === act || k.endsWith(`_${act}`) || act.endsWith(`_${k}`)) {
+      if (typeof val === "boolean") return val;
+      if (typeof val === "number") return val !== 0;
+      if (typeof val === "string") {
+        const l = val.toLowerCase().trim();
+        if (l === "true" || l === "1" || l === "on") return true;
+        if (l === "false" || l === "0" || l === "off") return false;
+      }
+    }
+  }
+
+  return undefined;
+}
+
 export function DeviceDetailView({
   device,
   onCommand,
@@ -72,6 +104,26 @@ export function DeviceDetailView({
   const payload = device.latest?.payload ?? {};
   const metricGroups = getDetailMetricGroups(device.metadata, payload);
   const isCamera = hasCameraMetrics(payload);
+  const sketchCommands =
+    (device.metadata?.commands as CommandDef[] | undefined) ?? [];
+
+  useEffect(() => {
+    if (!payload) return;
+    setToggles((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const cmd of sketchCommands) {
+        if (cmd.type === "toggle") {
+          const teleVal = getPayloadToggleValue(payload, cmd.action);
+          if (teleVal !== undefined && prev[cmd.action] !== teleVal) {
+            next[cmd.action] = teleVal;
+            changed = true;
+          }
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [payload, sketchCommands]);
 
   const { otaStatus, otaProgress, isOtaActive, otaLabel } =
     getOtaStatus(payload);
@@ -141,13 +193,20 @@ export function DeviceDetailView({
     setIsEditingName(true);
   }
 
-  async function send(payload: Record<string, unknown>, key: string) {
+  async function send(
+    payload: Record<string, unknown>,
+    key: string,
+    revertVal?: boolean,
+  ) {
     setSending(key);
     try {
       await onCommand(device.device_id, payload);
       toast.success("Команда отправлена");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Ошибка отправки");
+      if (revertVal !== undefined) {
+        setToggles((prev) => ({ ...prev, [key]: revertVal }));
+      }
     } finally {
       setSending(null);
     }
@@ -164,9 +223,13 @@ export function DeviceDetailView({
 
   function handleSketchCommand(cmd: CommandDef) {
     if (cmd.type === "toggle") {
-      const next = !(toggles[cmd.action] ?? false);
+      const currentVal =
+        toggles[cmd.action] ??
+        getPayloadToggleValue(payload, cmd.action) ??
+        false;
+      const next = !currentVal;
       setToggles((prev) => ({ ...prev, [cmd.action]: next }));
-      void send({ action: cmd.action, value: next }, cmd.action);
+      void send({ action: cmd.action, value: next }, cmd.action, currentVal);
     } else {
       if (
         cmd.action === "reboot" &&
@@ -223,9 +286,6 @@ export function DeviceDetailView({
     }
   }
 
-  const sketchCommands =
-    (device.metadata?.commands as CommandDef[] | undefined) ?? [];
-
   return (
     <>
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -233,12 +293,11 @@ export function DeviceDetailView({
           <Button
             variant="ghost"
             size="icon-sm"
-            asChild
+            render={<Link href="/dashboard" aria-label="Назад к списку" />}
+            nativeButton={false}
             className="mt-0.5 shrink-0 text-muted-foreground"
           >
-            <Link href="/dashboard" aria-label="Назад к списку">
-              <ArrowLeft className="size-4" />
-            </Link>
+            <ArrowLeft className="size-4" />
           </Button>
           <div className="min-w-0">
             {isEditingName ? (
@@ -465,7 +524,10 @@ export function DeviceDetailView({
                 {sketchCommands.map((cmd) => {
                   const Icon = getCommandIcon(cmd.icon);
                   const isToggle = cmd.type === "toggle";
-                  const toggleValue = toggles[cmd.action] ?? false;
+                  const toggleValue =
+                    toggles[cmd.action] ??
+                    getPayloadToggleValue(payload, cmd.action) ??
+                    false;
                   const isSending = sending === cmd.action;
                   return (
                     <Button
