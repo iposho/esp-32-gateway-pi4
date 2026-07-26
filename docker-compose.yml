@@ -14,6 +14,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
     container_name: esp32-admin
     restart: unless-stopped
     env_file: .env
@@ -21,6 +24,8 @@ services:
       # Supabase доступен по имени сервиса kong во внешней сети
       SUPABASE_URL: ${SUPABASE_URL:-http://kong:8000}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
       # MQTT-брокер внутри общей внутренней сети
       MQTT_URL: mqtt://mosquitto:1883
       MQTT_USERNAME: ${MQTT_USERNAME:-}

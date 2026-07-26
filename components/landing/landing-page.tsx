@@ -172,8 +172,9 @@ export function LandingPage() {
 
   useEffect(() => {
     const supabase = createClient()
+    if (!supabase) return
     supabase.auth.getUser().then(({ data }) => {
-      if (data.user) setIsLoggedIn(true)
+      if (data?.user) setIsLoggedIn(true)
     })
   }, [])
 

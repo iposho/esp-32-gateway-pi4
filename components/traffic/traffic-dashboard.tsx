@@ -85,6 +85,8 @@ export function TrafficDashboard() {
     if (paused) return
 
     const supabase = createClient()
+    if (!supabase) return
+
     const channel = supabase
       .channel('mqtt_events_live')
       .on(

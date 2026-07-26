@@ -19,8 +19,9 @@ export default function LoginPage() {
 
   useEffect(() => {
     const supabase = createClient()
+    if (!supabase) return
     supabase.auth.getUser().then(({ data }) => {
-      if (data.user) {
+      if (data?.user) {
         router.replace('/dashboard')
       }
     })
