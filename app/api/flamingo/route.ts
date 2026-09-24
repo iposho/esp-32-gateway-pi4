@@ -11,8 +11,18 @@ import { isDeviceActive } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
 
-/** Сколько последних записей с состоянием смотреть, чтобы найти момент переключения */
+/** Сколько последних записей телеметрии смотреть, чтобы найти момент переключения */
 const HISTORY_LIMIT = 500
+/**
+ * Окно поиска истории.
+ *
+ * Записи без нужного ключа отсеиваются уже в приложении (parseOnOff),
+ * а не фильтром `payload->key is not null` в SQL: вместе с LIMIT это делает
+ * запрос предсказуемым (не больше HISTORY_LIMIT чтений строк). SQL-фильтр
+ * без совпадений читал бы всю таблицу telemetry и упирался в statement_timeout
+ * Postgres — эндпоинт отвечал 503, если FLAMINGO_STATE_KEY указан неверно.
+ */
+const HISTORY_WINDOW_MS = 24 * 60 * 60 * 1000
 const DB_TIMEOUT_MS = 2_000
 /** Короткий кэш в памяти, чтобы не бить в БД на каждый запрос сайта */
 const CACHE_TTL_MS = 5_000
@@ -52,7 +62,7 @@ async function loadStatus(): Promise<FlamingoStatus> {
       .from('telemetry')
       .select('created_at, value:payload->' + key)
       .eq('device_id', deviceId)
-      .not(`payload->${key}`, 'is', null)
+      .gte('created_at', new Date(Date.now() - HISTORY_WINDOW_MS).toISOString())
       .order('created_at', { ascending: false })
       .limit(HISTORY_LIMIT)
       .abortSignal(signal),
@@ -65,6 +75,8 @@ async function loadStatus(): Promise<FlamingoStatus> {
   const telemetryAt = (latestRes.data?.created_at as string | null) ?? null
   const online = isDeviceActive(lastSeen, telemetryAt)
 
+  // SAFETY: форма строки задана select("created_at, value:payload-><key>") выше;
+  // PostgREST отдаёт data без типов, и TS не может проверить соответствие.
   const rows = (historyRes.data ?? []) as unknown as Array<{
     created_at: string
     value: unknown
@@ -92,10 +104,17 @@ async function loadStatus(): Promise<FlamingoStatus> {
     changedAt = row.created_at
   }
 
+  if (on === undefined) {
+    console.error(
+      `[Flamingo] No "${key}" values among the last ${HISTORY_LIMIT} telemetry rows ` +
+        `of ${deviceId} (${HISTORY_WINDOW_MS / 3_600_000}h) — check FLAMINGO_STATE_KEY`,
+    )
+  }
+
   return {
     on: on ?? false,
     online,
-    // Если переключения нет в окне истории — точный момент неизвестен
+    // Если переключения нет в окне истории (24 часа) — точный момент неизвестен
     changedAt: sawChange ? toIso(changedAt) : null,
     updatedAt: toIso(updatedAt),
   }
