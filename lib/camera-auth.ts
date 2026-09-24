@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'crypto'
 import type { NextRequest } from 'next/server'
 
-function safeEqual(a: string, b: string): boolean {
+export function safeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false
   try {
     return timingSafeEqual(Buffer.from(a), Buffer.from(b))
