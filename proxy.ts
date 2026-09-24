@@ -19,6 +19,8 @@ const PUBLIC_PATHS = [
   '/api/auth/logout',
   '/api/status',
   '/api/firmware',
+  // Внешний сайт; Bearer-токен проверяется в самом роуте
+  '/api/flamingo',
 ]
 
 export default async function proxy(request: NextRequest) {
