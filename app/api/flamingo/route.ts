@@ -75,6 +75,8 @@ async function loadStatus(): Promise<FlamingoStatus> {
   const telemetryAt = (latestRes.data?.created_at as string | null) ?? null
   const online = isDeviceActive(lastSeen, telemetryAt)
 
+  // SAFETY: форма строки задана select("created_at, value:payload-><key>") выше;
+  // PostgREST отдаёт data без типов, и TS не может проверить соответствие.
   const rows = (historyRes.data ?? []) as unknown as Array<{
     created_at: string
     value: unknown
