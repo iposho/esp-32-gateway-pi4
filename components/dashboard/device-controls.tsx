@@ -22,8 +22,14 @@ export type SendCommand = (
   payload: Record<string, unknown>,
 ) => Promise<void>;
 
-/** Сколько ждём подтверждения от устройства (новой телеметрии) */
-const CONFIRM_TIMEOUT_MS = 8000;
+/**
+ * Сколько ждём подтверждения от устройства (новой телеметрии).
+ *
+ * Должно быть больше периода плановой телеметрии устройства (10 с), иначе
+ * таймаут истекает раньше, чем приходит следующая посылка, и UI ругается на
+ * команду, которая на самом деле выполнена.
+ */
+const CONFIRM_TIMEOUT_MS = 15000;
 /** Сколько показываем «Готово» после подтверждения */
 const DONE_FLASH_MS = 2500;
 /** Задержка отправки значения ползунка после последнего движения */
@@ -56,19 +62,34 @@ export function useDeviceCommands(
     );
   }, []);
 
-  // Подтверждение по телеметрии
+  /**
+   * Команда выполнена, если в телеметрии появилось нужное значение
+   * (toggle/range) или, для команд без значения (trigger), пришла свежая
+   * телеметрия после отправки.
+   */
+  const isConfirmed = useCallback(
+    (action: string, p: Pending) => {
+      if (typeof p.desired === "boolean") {
+        return getToggleState(payload, action) === p.desired;
+      }
+      if (typeof p.desired === "number") {
+        return getRangeState(payload, action) === p.desired;
+      }
+      return latestAt > p.sentAt;
+    },
+    [payload, latestAt],
+  );
+
+  // Подтверждение по телеметрии.
+  // `pending` в зависимостях обязателен: ответ устройства может прийти
+  // раньше, чем состояние попадёт в этот рендер, и без него команда не
+  // перепроверяется до следующего опроса (а то и вовсе).
   useEffect(() => {
     setPending((prev) => {
       let changed = false;
       const next = { ...prev };
       for (const [action, p] of Object.entries(prev)) {
-        const confirmed =
-          typeof p.desired === "boolean"
-            ? getToggleState(payload, action) === p.desired
-            : typeof p.desired === "number"
-              ? getRangeState(payload, action) === p.desired
-              : latestAt > p.sentAt;
-        if (confirmed) {
+        if (isConfirmed(action, p)) {
           delete next[action];
           changed = true;
           flashDone(action);
@@ -76,9 +97,12 @@ export function useDeviceCommands(
       }
       return changed ? next : prev;
     });
-  }, [payload, latestAt, flashDone]);
+  }, [pending, isConfirmed, flashDone]);
 
-  // Таймаут: устройство не ответило
+  // Таймаут: устройство не ответило.
+  // Перед тем как показывать предупреждение, ещё раз проверяем свежие
+  // данные: телеметрия могла прийти, пока команда ждала своей очереди
+  // в медленном опросе.
   useEffect(() => {
     const actions = Object.keys(pending);
     if (actions.length === 0) return;
@@ -88,9 +112,12 @@ export function useDeviceCommands(
         let changed = false;
         const next = { ...prev };
         for (const [action, p] of Object.entries(prev)) {
-          if (now - p.sentAt > CONFIRM_TIMEOUT_MS) {
-            delete next[action];
-            changed = true;
+          if (now - p.sentAt <= CONFIRM_TIMEOUT_MS) continue;
+          delete next[action];
+          changed = true;
+          if (isConfirmed(action, p)) {
+            flashDone(action);
+          } else {
             toast.warning(
               `«${titles.current[action] ?? action}»: устройство не подтвердило команду`,
             );
@@ -100,7 +127,7 @@ export function useDeviceCommands(
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, [pending]);
+  }, [pending, isConfirmed, flashDone]);
 
   const send = useCallback(
     async (cmd: CommandDef, value?: boolean | number) => {

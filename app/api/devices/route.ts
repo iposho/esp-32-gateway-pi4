@@ -11,6 +11,20 @@ import { isDeviceActive, type Device, type Telemetry } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
 
+/**
+ * Насколько назад искать «липкие» поля камеры (`last_photo_url`,
+ * `camera_ready`).
+ *
+ * Без ограничения по времени этот запрос сканирует всю телеметрию: фильтр
+ * `payload->>key is not null` не покрыт индексом, а сами payload лежат
+ * в TOAST — 1,15 млн строк читались ~4 с. Админка опрашивает эндпоинт
+ * каждые 3 с, цикл опроса растягивался до ~7 с, и команды не успевали
+ * подтвердиться — UI показывал «устройство не подтвердило команду».
+ * Час даёт ~360 строк на активное устройство (телеметрия раз в 10 с),
+ * это ~70 мс; более старый снимок на дашборде неактуален.
+ */
+const CAMERA_LOOKBACK_HOURS = 1
+
 export async function GET() {
   let supabase
   try {
@@ -50,6 +64,10 @@ export async function GET() {
         .select('*')
         .in('device_id', ids)
         .or('payload->>last_photo_url.not.is.null,payload->>camera_ready.not.is.null')
+        .gte(
+          'created_at',
+          new Date(Date.now() - CAMERA_LOOKBACK_HOURS * 3_600_000).toISOString(),
+        )
         .order('created_at', { ascending: false })
         .limit(200),
     ])
