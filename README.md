@@ -127,6 +127,34 @@ docker run --rm -it -v "$PWD/mosquitto/config:/mosquitto/config" \
 ACL (`mosquitto/config/acl`) ограничивает топики: устройства пишут в свои
 `status`/`telemetry`/`capabilities` и читают `command`; бэкенд имеет полный доступ.
 
+### Пересекающиеся подписки (важно)
+
+У Node-RED есть и точные подписки (`devices/+/status`, `devices/+/telemetry`,
+`devices/+/capabilities`), и общий `devices/#` для аудита. Mosquitto по
+умолчанию отправляет копию сообщения на **каждую** совпавшую подписку, поэтому
+каждое сообщение устройства обрабатывалось дважды: телеметрия ложилась двумя
+строками, а `mqtt_events` — двумя записями (ровно 50 % строк в обеих таблицах
+были копиями, и таблица телеметрии росла вдвое быстрее нужного).
+
+В `mosquitto.conf` это выключено:
+
+```
+allow_duplicate_messages false
+```
+
+Проверка — один клиент с двумя пересекающимися фильтрами не должен получать
+сообщение дважды:
+
+```bash
+pw=$(grep -m1 '^MQTT_PASSWORD=' .env | cut -d= -f2- | tr -d '"')
+docker exec esp32-mosquitto mosquitto_sub -h localhost -u backend -P "$pw" \
+  -t 'devices/+/telemetry' -t 'devices/#' -W 25 -v | wc -l
+```
+
+Опция есть начиная с Mosquitto 2.1. На более старых версиях дубли можно убрать
+только разведением пересекающихся подписок по разным клиентам (двум broker-нодам
+Node-RED с разными clientid).
+
 Проверка брокера:
 ```bash
 # подписка
@@ -147,6 +175,8 @@ mosquitto_pub -h <IP_Pi> -p 1883 -u esp32 -P <pass> \
 4. Flow подписывается на `devices/+/status`, `devices/+/telemetry`,
    `devices/+/capabilities` и `devices/#` (audit log → `mqtt_events`), преобразует
    payload и делает upsert/insert в Supabase через PostgREST.
+   Внимание: эти подписки пересекаются — без `allow_duplicate_messages false`
+   в `mosquitto.conf` каждое сообщение придёт дважды (см. раздел 2).
 5. Нажми **Deploy**.
 
 Проверка: опубликуй тестовое сообщение (см. выше) — в Debug-панели Node-RED
