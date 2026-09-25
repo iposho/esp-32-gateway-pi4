@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getServiceClient } from '@/lib/supabase/server'
+import { capabilitiesTopic } from '@/lib/commands'
+import { clearRetained } from '@/lib/mqtt'
 import {
   extractCameraFields,
   groupTelemetryByDevice,
@@ -156,26 +158,48 @@ export async function DELETE(
     return NextResponse.json({ error: 'Device ID is required' }, { status: 400 })
   }
 
-  // Delete from devices table. 
-  // We'll delete telemetry explicitly just in case to be safe, if there's no FK constraint.
-  const { error: teleError } = await supabase
-    .from('telemetry')
-    .delete()
-    .eq('device_id', deviceId)
+  // 1. «Надгробие»: пока оно есть, Node-RED не пересоздаст устройство
+  //    из телеметрии/retained-сообщений (см. scripts/006_deleted_devices.sql)
+  const { error: tombError } = await supabase
+    .from('deleted_devices')
+    .upsert({ device_id: deviceId, deleted_at: new Date().toISOString() })
 
-  if (teleError) {
-    console.error('[DELETE Device] Telemetry deletion error:', teleError.message)
-    return NextResponse.json({ error: teleError.message }, { status: 500 })
+  if (tombError) {
+    console.error('[DELETE Device] Tombstone error:', tombError.message)
+    return NextResponse.json(
+      {
+        error: `Не удалось пометить устройство удалённым: ${tombError.message}. Примените scripts/006_deleted_devices.sql`,
+      },
+      { status: 500 },
+    )
   }
 
-  const { error } = await supabase
+  // 2. Стираем retained status/capabilities в брокере, иначе они
+  //    прилетают в Node-RED при каждом переподключении
+  const retainedResults = await Promise.allSettled([
+    clearRetained(`devices/${deviceId}/status`),
+    clearRetained(capabilitiesTopic(deviceId)),
+  ])
+  for (const r of retainedResults) {
+    if (r.status === 'rejected') {
+      console.error('[DELETE Device] Clear retained error:', String(r.reason))
+    }
+  }
+
+  // 3. Удаляем устройство; telemetry и commands удаляются каскадом (FK)
+  const { data: deleted, error } = await supabase
     .from('devices')
     .delete()
     .eq('device_id', deviceId)
+    .select('device_id')
 
   if (error) {
     console.error('[DELETE Device] Device deletion error:', error.message)
     return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+
+  if (!deleted?.length) {
+    return NextResponse.json({ error: 'Устройство не найдено' }, { status: 404 })
   }
 
   return NextResponse.json({ success: true })

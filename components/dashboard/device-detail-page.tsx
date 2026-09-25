@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback } from 'react'
+import { useCallback, useRef } from 'react'
 import useSWR from 'swr'
 import Link from 'next/link'
 import { useRouter, useParams } from 'next/navigation'
@@ -15,15 +15,27 @@ type DeviceWithLatest = Device & { latest: Telemetry | null }
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
+/** Обычный интервал опроса и ускоренный — сразу после отправки команды */
+const REFRESH_MS = 3000
+const FAST_REFRESH_MS = 700
+const FAST_REFRESH_WINDOW_MS = 8000
+
 export function DeviceDetailPage() {
   const router = useRouter()
   const params = useParams<{ deviceId: string }>()
   const deviceId = decodeURIComponent(params.deviceId)
 
+  // До этого момента опрашиваем чаще, чтобы быстрее увидеть ответ устройства
+  const fastUntilRef = useRef(0)
+
   const { data, error, isLoading, mutate } = useSWR<{ device: DeviceWithLatest }>(
     deviceId ? `/api/devices/${encodeURIComponent(deviceId)}` : null,
     fetcher,
-    { refreshInterval: 3000, keepPreviousData: true },
+    {
+      refreshInterval: () =>
+        Date.now() < fastUntilRef.current ? FAST_REFRESH_MS : REFRESH_MS,
+      keepPreviousData: true,
+    },
   )
 
   const device = data?.device
@@ -39,7 +51,8 @@ export function DeviceDetailPage() {
         const d = await res.json().catch(() => ({}))
         throw new Error(d.error ?? 'Ошибка')
       }
-      await mutate()
+      fastUntilRef.current = Date.now() + FAST_REFRESH_WINDOW_MS
+      void mutate()
     },
     [mutate],
   )

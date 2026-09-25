@@ -66,6 +66,9 @@ flowchart LR
    Для дашборда MQTT-трафика дополнительно выполни `scripts/004_mqtt_events.sql`
    (таблица `mqtt_events`, Realtime, retention-функция `cleanup_mqtt_events`).
 
+   Для удаления устройств из админки выполни `scripts/006_deleted_devices.sql`
+   (без него Node-RED сразу пересоздаёт удалённое устройство из MQTT).
+
 2. **Узнать имя docker-сети** Supabase-стека:
    ```bash
    docker network ls | grep supabase

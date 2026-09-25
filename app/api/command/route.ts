@@ -1,4 +1,4 @@
-import { NextResponse, type NextRequest } from 'next/server'
+import { after, NextResponse, type NextRequest } from 'next/server'
 import { getServiceClient } from '@/lib/supabase/server'
 import { commandTopic } from '@/lib/commands'
 import { publishCommand } from '@/lib/mqtt'
@@ -43,14 +43,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `MQTT: ${message}` }, { status: 502 })
   }
 
-  // Логируем успешную команду в аудит
-  const { error } = await supabase.from('commands').insert({
-    device_id: deviceId,
-    topic,
-    payload,
-    status: 'sent',
+  // Логируем успешную команду в аудит уже после ответа — не задерживаем UI
+  after(async () => {
+    const { error } = await supabase.from('commands').insert({
+      device_id: deviceId,
+      topic,
+      payload,
+      status: 'sent',
+    })
+    if (error) console.log('[v0] command audit insert error:', error.message)
   })
-  if (error) console.log('[v0] command audit insert error:', error.message)
 
   return NextResponse.json({ ok: true, topic })
 }

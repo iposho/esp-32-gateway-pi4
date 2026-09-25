@@ -28,15 +28,20 @@ export function Dashboard() {
 
   const deleteDevice = useCallback(
     async (deviceId: string) => {
-      const res = await fetch(`/api/devices/${deviceId}`, {
+      const res = await fetch(`/api/devices/${encodeURIComponent(deviceId)}`, {
         method: 'DELETE',
       })
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
         throw new Error(d.error ?? 'Ошибка при удалении')
       }
-      // Revalidate cache
-      mutate()
+      await mutate(
+        (current) =>
+          current
+            ? { devices: current.devices.filter((d) => d.device_id !== deviceId) }
+            : current,
+        { revalidate: true },
+      )
     },
     [mutate]
   )
