@@ -48,7 +48,7 @@ BIRDFEEDER_DEVICE_ID=esp32-bird-cam
    grep -q '^BIRDFEEDER_DEVICE_ID=' .env || echo 'BIRDFEEDER_DEVICE_ID=esp32-bird-cam' >> .env
    docker compose up -d --build admin
    ```
-   Остальные сервисы (mosquitto, nodered, telegram-bot, camelion-bridge) не трогаются.
+   Остальные сервисы (mosquitto, nodered, telegram-bot) не трогаются.
 3. **Проверка:**
    ```bash
    T=$(grep -m1 '^CAMERA_API_TOKEN=' .env | cut -d= -f2- | tr -d '"')
@@ -80,7 +80,7 @@ BIRDFEEDER_DEVICE_ID=esp32-bird-cam
 
 ```text
 Ты на Raspberry Pi в репозитории esp32-gateway-pi4 (docker compose: admin, mosquitto,
-nodered, telegram-bot, camelion-bridge). Нужно раскатить поддержку кормушки — подробности
+nodered, telegram-bot). Нужно раскатить поддержку кормушки — подробности
 в docs/birdfeeder.md. Задача:
 
 1. git status: если есть локальные изменения — остановись и покажи их мне, ничего не

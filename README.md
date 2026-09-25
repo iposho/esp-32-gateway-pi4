@@ -174,10 +174,41 @@ mosquitto_pub -h <IP_Pi> -p 1883 -u esp32 -P <pass> \
 3. Импортируй `node-red/flows.example.json` (Menu → Import).
 4. Flow подписывается на `devices/+/status`, `devices/+/telemetry`,
    `devices/+/capabilities` и `devices/#` (audit log → `mqtt_events`), преобразует
-   payload и делает upsert/insert в Supabase через PostgREST.
+   payload и пишет в Supabase через PostgREST: статус — `POST /rpc/set_device_status`,
+   телеметрия — insert в `telemetry` + `rpc/touch_device`, capabilities —
+   `rpc/merge_device_commands`.
    Внимание: эти подписки пересекаются — без `allow_duplicate_messages false`
    в `mosquitto.conf` каждое сообщение придёт дважды (см. раздел 2).
 5. Нажми **Deploy**.
+
+> Статус **обязательно** должен писаться через `rpc/set_device_status`, а не
+> прямым upsert `POST /devices?on_conflict=device_id` (так делали старые
+> версии flow). Только RPC снимает «надгробие» из `deleted_devices` при свежем
+> `online`; прямой upsert молча отбрасывает триггер `devices_block_deleted`
+> (скрипт 008) — удалённое устройство больше никогда не вернётся в админку.
+> См. [«Удалённое устройство не возвращается»](#-удалённое-устройство-не-возвращается).
+
+### Обновить flow на уже работающем Pi
+
+Развёрнутый flow лежит в `node-red/data/flows.json` — он в `.gitignore`, и
+`git pull` его не трогает. Изменения из `flows.example.json` переносятся
+вручную: либо импортом в редакторе (Menu → Import → «Replace» существующих
+узлов → **Deploy**), либо скриптом для узла статуса:
+
+```bash
+cd ~/esp-32-gateway-pi4          # корень репозитория на Pi
+git pull
+python3 scripts/fix-nodered-status-rpc.py --dry-run   # показать, что изменится
+python3 scripts/fix-nodered-status-rpc.py             # применить (делает flows.json.bak-<время>)
+docker compose restart nodered                        # только Node-RED, остальной стек не трогаем
+```
+
+Скрипт находит function-узел за `mqtt in` `devices/+/status`, подставляет в
+него код `fn-status` из `flows.example.json` и переводит следующий за ним
+`http request` в режим `method: use` (метод и URL задаёт function-узел).
+Если в других узлах остался прямой upsert в `/devices`, скрипт это покажет.
+После перезапуска обнови вкладку редактора Node-RED — иначе Deploy из старой
+вкладки перезапишет исправленный flow.
 
 Проверка: опубликуй тестовое сообщение (см. выше) — в Debug-панели Node-RED
 появится ответ PostgREST, а в таблице `devices` — новая запись. Сообщение также
@@ -312,8 +343,8 @@ capabilities остаются только «Обновить» и «Устро�
 (IP, RSSI, аптайм, RAM, температура, влажность, OTA).
 
 ```
-🟢 bedroom  ·  в сети
-esp32-bedroom  ·  только что
+🟢 flamingo  ·  в сети
+esp32-flamingo  ·  только что
 
 🌐 Сеть
 ┃ 🌐 IP-адрес: 192.168.1.42
@@ -323,12 +354,11 @@ esp32-bedroom  ·  только что
 ┃ ⏱ Аптайм: 1 дн 2 ч
 ┃ 🧠 Свободная RAM: 178.1 КБ
 
-📍 Camelion
-┃ 💡 Лампа: вкл
-┃ ☀️ Яркость: 80 %  ██████░░
+📍 Вывеска
+┃ 💡 Вывеска: вкл
+┃ ✨ Гирлянда: выкл
 
-[🟢 Лампа Camelion · вкл]
-[➖] [☀️ Яркость · 80] [➕]
+[🟢 Вывеска · вкл] [⚪ Гирлянда · выкл]
 [🔄 Перезагрузка]
 [⟳ Обновить] [← Устройства]
 ```
@@ -383,26 +413,12 @@ esp32.kuzyak.in {
 
 ## 7. Прошивка ESP32
 
-Примеры в `firmware/`:
+Пример в `firmware/`:
 
 - **`esp32-example.ino`** — базовая заготовка (PubSubClient + ArduinoJson):
   - публикует `online` при подключении, `offline` через LWT при обрыве;
   - шлёт телеметрию (uptime, RSSI, heap) каждые 10 с;
   - слушает `devices/<id>/command` и выполняет команды (пример: реле).
-
-- **`esp32-bedroom.ino`** — управление Camelion WiFi-лампой через KY-040 энкодер:
-  - KY-040: CLK→GPIO25, DT→GPIO26, SW→GPIO27, INPUT_PULLUP, с автоускорением;
-  - поворот → яркость, нажатие → вкл/выкл, удержание+поворот → цветовая температура;
-  - MQTT-команды: `camelion_power`, `camelion_brightness`, `camelion_temp`, `reboot`;
-  - relay-топик `devices/esp32-bedroom/out/camelion` → Python-мост на RPi;
-  - телеметрия сразу после смены состояния + каждые 10 с;
-  - LED (GPIO 2) выключен по умолчанию.
-
-- **`camelion_bridge.py`** — Python-мост для управления Tuya-лампой через Cloud API:
-  - подписывается на `devices/esp32-bedroom/out/camelion`;
-  - управляет лампой через `tinytuya.Cloud`;
-  - публикует состояние лампы в `devices/camelion/telemetry` (retained);
-  - опрашивает лампу раз в 60 с.
 
 Каждый скетч сам декларирует свои команды и метрики через retained-топик `devices/<id>/capabilities`.
 
@@ -571,7 +587,8 @@ components/              # UI и дашборд
 lib/                     # supabase-клиент, auth (HMAC-cookie), mqtt-паблишер
 scripts/                 # SQL-миграции 001–010 (схема, retention, обслуживание)
 mosquitto/config/        # конфиг + ACL брокера
-node-red/                # пример flow
+node-red/                # пример flow (развёрнутый node-red/data/ — вне git)
+scripts/fix-nodered-status-rpc.py  # перевод статуса в развёрнутом flow на rpc/set_device_status
 telegram-bot/            # Telegram ↔ MQTT bridge (+ avatar.svg, avatar.png)
 firmware/                # пример прошивки ESP32
 Dockerfile               # standalone-сборка админки
@@ -585,8 +602,7 @@ docker-compose.yml       # единый стек
 | `devices/<id>/status` | ESP32 → | `{"status":"online"}` (retained + LWT) |
 | `devices/<id>/telemetry` | ESP32 → | `{"uptime":123,"rssi":-60,"heap":40000}`<br>`{"ota":"downloading","progress":40}` |
 | `devices/<id>/capabilities` | ESP32 → | `{"commands":[{"action":"led","title":"Свет","type":"toggle"}, {"action":"brightness","title":"Яркость","type":"range","min":0,"max":100}]}` (retained) |
-| `devices/<id>/out/camelion` | ESP32 → | `{"action":"power","value":1}` — relay на Python-мост (RPi) |
-| `devices/<id>/command` | → ESP32 | `{"action":"led","value":true}`<br>`{"action":"capture"}`<br>`{"action":"reboot"}`<br>`{"action":"pin_read","pin":32}`<br>`{"action":"pin_write","pin":2,"value":1}`<br>`{"action":"camelion_power","value":true}`<br>`{"action":"camelion_brightness","value":75}`<br>`{"action":"camelion_temp","value":30}`<br>`{"action":"ota","url":"http://..."}` |
+| `devices/<id>/command` | → ESP32 | `{"action":"led","value":true}`<br>`{"action":"capture"}`<br>`{"action":"reboot"}`<br>`{"action":"pin_read","pin":32}`<br>`{"action":"pin_write","pin":2,"value":1}`<br>`{"action":"ota","url":"http://..."}` |
 
 ---
 
@@ -617,6 +633,62 @@ docker-compose.yml       # единый стек
 2. Проверь Mosquitto: `docker compose logs mosquitto`.
 3. Проверь Node-RED: открыть `http://<IP_Pi>:1880`, посмотреть Debug-панель.
 4. Убедись, что в таблице `devices` появилась запись с `device_id`.
+5. Если устройство когда-то удаляли из админки — см. следующий пункт.
+
+### ♻️ Удалённое устройство не возвращается
+
+Симптом: устройство публикует в MQTT (сообщения есть в `mqtt_events` и на
+`/dashboard/traffic`), но в `devices` строки нет и `telemetry` не пишется.
+
+**Причина:** `device_id` лежит в `deleted_devices`. «Надгробие» снимает только
+`set_device_status(p_device_id, p_is_online => true)` (скрипт 006): при свежем
+`online` функция удаляет запись из `deleted_devices` и делает upsert в
+`devices`. Если flow пишет статус прямым `POST /devices?on_conflict=device_id`,
+триггер `devices_block_deleted` (008) молча отбрасывает вставку, а телеметрия
+падает на внешнем ключе `telemetry.device_id → devices.device_id`.
+
+**Решение:** переведи flow на RPC (см.
+[«Обновить flow на уже работающем Pi»](#обновить-flow-на-уже-работающем-pi)).
+Надгробия руками не удаляй — это сделает сама функция.
+
+Проверка до исправления — какие устройства сейчас «похоронены»:
+
+```sql
+select dd.device_id, dd.deleted_at,
+       (select max(created_at) from public.mqtt_events e
+         where e.device_id = dd.device_id) as last_mqtt
+from public.deleted_devices dd
+order by last_mqtt desc nulls last;
+```
+
+После `docker compose restart nodered` Node-RED переподписывается и получает
+retained `devices/<id>/status`. Устройства, которые переподключались к брокеру
+после удаления (и, значит, заново опубликовали retained `online`), вернутся
+сразу. Остальные — после ближайшего переподключения/перезагрузки платы.
+Учти: вернутся **все** работающие устройства из `deleted_devices`, в том числе
+удалённые намеренно, — так устроено правило «свежий online = устройство снова
+в строю». Такие платы нужно выключить (или сменить им hostname).
+
+Проверка после исправления (`<id>` — устройство, которое должно вернуться):
+
+```bash
+# статус должен уходить в rpc/set_device_status — в Debug-панели Node-RED
+# ответ http-узла без ошибок (204 / пустое тело)
+docker compose logs --since 5m nodered | grep -i -E 'error|40[0-9]'
+```
+
+```sql
+select * from public.deleted_devices where device_id = '<id>';  -- 0 строк
+select device_id, is_online, last_seen from public.devices
+ where device_id = '<id>';                                       -- 1 строка, is_online = true
+select count(*), max(created_at) from public.telemetry
+ where device_id = '<id>' and created_at > now() - interval '5 minutes';
+                                                                 -- растёт раз в ~10 с
+```
+
+Если плата давно не переподключалась, перезагрузи её командой
+`{"action":"reboot"}` (кнопка в Telegram-боте или `mosquitto_pub` от
+`backend` в `devices/<id>/command`) — после загрузки она опубликует `online`.
 
 ### 🗑️ Устройство не удаляется: statement timeout
 

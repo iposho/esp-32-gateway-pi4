@@ -1,2 +1,0 @@
-tinytuya>=1.14
-paho-mqtt>=2.0
