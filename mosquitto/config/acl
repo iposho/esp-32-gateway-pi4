@@ -25,6 +25,7 @@ topic readwrite devices/#
 user telegram
 topic read devices/+/status
 topic read devices/+/telemetry
+topic read devices/+/capabilities
 topic write devices/+/command
 
 # --- Пользователь для отладки (только чтение) ---

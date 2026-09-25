@@ -50,6 +50,7 @@ const state = new Map(
       status: 'unknown',
       telemetry: {},
       statusSeen: false,
+      capabilities: null,
       ota: undefined,
       lastError: undefined,
       unresponsive: false,
@@ -59,6 +60,9 @@ const state = new Map(
 )
 
 let telegramOffset = 0
+
+/** Ожидающие свежей телеметрии после команды: deviceId → [resolve] */
+const telemetryWaiters = new Map()
 
 // ═══════════════════════════════════════════
 //  MQTT
@@ -74,7 +78,7 @@ const mqttClient = mqtt.connect(MQTT_URL, {
 
 mqttClient.on('connect', () => {
   console.log(`[mqtt] connected to ${MQTT_URL}`)
-  mqttClient.subscribe(['devices/+/status', 'devices/+/telemetry'], { qos: 1 }, (error) => {
+  mqttClient.subscribe(['devices/+/status', 'devices/+/telemetry', 'devices/+/capabilities'], { qos: 1 }, (error) => {
     if (error) console.error('[mqtt] subscribe failed', error)
   })
 })
@@ -92,6 +96,12 @@ mqttClient.on('message', (topic, payloadBuffer) => {
   if (!device) return
 
   const payload = parsePayload(payloadBuffer)
+
+  // Retained-описание команд/метрик из скетча — не считаем «признаком жизни»
+  if (kind === 'capabilities') {
+    device.capabilities = normalizeCapabilities(payload)
+    return
+  }
   const wasUnresponsive = device.unresponsive
   device.unresponsive = false
   device.updatedAt = new Date()
@@ -127,6 +137,7 @@ mqttClient.on('message', (topic, payloadBuffer) => {
   if (kind === 'telemetry') {
     const telemetry = typeof payload === 'object' && payload !== null ? payload : { value: payload }
     device.telemetry = telemetry
+    resolveTelemetryWaiters(device.deviceId)
 
     if (wasUnresponsive) {
       void notifyAll(
@@ -219,8 +230,7 @@ async function handleUpdate(update) {
     const chatId = String(update.callback_query.message?.chat.id)
     if (!isAllowed(chatId)) return
 
-    await telegram('answerCallbackQuery', { callback_query_id: update.callback_query.id })
-    await handleCallback(chatId, update.callback_query.data ?? '')
+    await handleCallback(update.callback_query)
   }
 }
 
@@ -238,7 +248,7 @@ async function handleCommand(chatId, text) {
   }
 
   if (command === '/devices') {
-    await sendMessage(chatId, '📟 Выберите устройство:', devicesKeyboard())
+    await sendMessage(chatId, devicesText(), devicesKeyboard())
     return
   }
 
@@ -248,12 +258,12 @@ async function handleCommand(chatId, text) {
   }
 
   if (command === '/dashboard' || command === '/all') {
-    await sendMessage(chatId, dashboardText(), mainKeyboard())
+    await sendMessage(chatId, dashboardText(), devicesKeyboard())
     return
   }
 
   if (command === '/commands') {
-    await sendMessage(chatId, commandsText(), commandsKeyboard())
+    await sendDeviceStatus(chatId, resolveAlias(args[0]))
     return
   }
 
@@ -272,7 +282,7 @@ async function handleCommand(chatId, text) {
     await sendMessage(chatId, `⚠️ Подтвердить перезагрузку <b>${escapeHtml(alias)}</b>?`, {
       inline_keyboard: [[
         { text: '🔄 Перезагрузить', callback_data: `confirm:reboot:${alias}` },
-        { text: '❌ Отмена', callback_data: `device:${alias}` },
+        { text: '✖️ Отмена', callback_data: `dev:${alias}` },
       ]],
     })
     return
@@ -330,7 +340,7 @@ async function handleCapture(chatId, args) {
       await sendMessage(
         chatId,
         `📸 Команда отправлена в <b>${escapeHtml(alias)}</b>\nНе удалось получить снимок по ранее известному URL.`,
-        deviceKeyboard(alias),
+        deviceKeyboard(device),
       )
     }
     return
@@ -340,43 +350,117 @@ async function handleCapture(chatId, args) {
   await publishCommand(chatId, alias, { action: 'capture' })
 }
 
-async function handleCallback(chatId, data) {
-  const [kind, action, alias, arg] = data.split(':')
+async function handleCallback(query) {
+  const chatId = String(query.message?.chat.id)
+  const messageId = query.message?.message_id
+  const data = query.data ?? ''
+  const [kind, alias, idxRaw, valueRaw] = data.split(':')
+  const answer = (text) =>
+    telegram('answerCallbackQuery', {
+      callback_query_id: query.id,
+      ...(text ? { text } : {}),
+    }).catch(() => {})
 
-  if (kind === 'devices') {
-    await sendMessage(chatId, '📟 Выберите устройство:', devicesKeyboard())
+  // Навигация — перерисовываем то же сообщение, а не шлём новое
+  if (kind === 'devices' || kind === 'devs') {
+    await answer()
+    await render(chatId, messageId, devicesText(), devicesKeyboard())
+    return
+  }
+  if (kind === 'dash' || (kind === 'checkin' && alias !== 'help')) {
+    await answer()
+    await render(chatId, messageId, dashboardText(), devicesKeyboard())
+    return
+  }
+  if (kind === 'help' || kind === 'checkin') {
+    await answer()
+    await sendMessage(chatId, helpText(), mainKeyboard())
+    return
+  }
+  if (kind === 'noop') {
+    await answer()
     return
   }
 
-  if (kind === 'device') {
-    await sendDeviceStatus(chatId, action)
+  // Старые кнопки (device:<alias>, cmd:status:<alias>) тоже открывают карточку
+  const targetAlias =
+    kind === 'device' ? alias : kind === 'cmd' || kind === 'confirm' ? idxRaw : alias
+  const device = state.get(targetAlias)
+  if (!device) {
+    await answer('Устройство не найдено')
     return
   }
 
-  if (kind === 'cmd') {
-    if (action === 'led_on') await publishCommand(chatId, alias, { action: 'led', value: true })
-    if (action === 'led_off') await publishCommand(chatId, alias, { action: 'led', value: false })
-    if (action === 'capture') await handleCapture(chatId, [alias])
-    if (action === 'status') await sendDeviceStatus(chatId, alias)
+  if (kind === 'dev' || kind === 'device' || kind === 'ref' || (kind === 'cmd' && alias === 'status')) {
+    await answer(kind === 'ref' ? 'Обновлено' : undefined)
+    await showDevice(chatId, device.alias, messageId)
     return
   }
 
-  if (kind === 'checkin') {
-    if (action === 'help') {
-      await sendMessage(chatId, helpText(), mainKeyboard())
-    } else {
-      await sendMessage(chatId, dashboardText(), mainKeyboard())
+  if (kind === 'cap' || (kind === 'cmd' && alias === 'capture')) {
+    await answer('📸 Делаю снимок…')
+    await handleCapture(chatId, [device.alias])
+    return
+  }
+
+  if (kind === 'confirm' && alias === 'reboot') {
+    await answer()
+    await runCommand(chatId, messageId, device, { action: 'reboot' }, 'Перезагрузка')
+    return
+  }
+
+  const cmd = deviceCommands(device)[Number(idxRaw)]
+  if (!cmd) {
+    await answer('Команда устарела — обновляю карточку')
+    await showDevice(chatId, device.alias, messageId)
+    return
+  }
+
+  // Опасные команды — через подтверждение в той же карточке
+  if (kind === 'ask') {
+    await answer()
+    await render(
+      chatId,
+      messageId,
+      `${commandEmoji(cmd)} <b>${escapeHtml(cmd.title)}</b> на <b>${escapeHtml(device.alias)}</b>?\n\n` +
+        (cmd.description ? `<i>${escapeHtml(cmd.description)}</i>\n\n` : '') +
+        'Подтвердите действие.',
+      {
+        inline_keyboard: [[
+          { text: `✅ ${cmd.title}`, callback_data: `c:${device.alias}:${idxRaw}:y` },
+          { text: '✖️ Отмена', callback_data: `dev:${device.alias}` },
+        ]],
+      },
+    )
+    return
+  }
+
+  if (kind === 'c') {
+    if (isDangerous(cmd) && valueRaw !== 'y') {
+      await answer()
+      return
     }
+    let payload = { action: cmd.action }
+    let label = cmd.title
+    if (cmd.type === 'toggle') {
+      const next = !toggleValue(device, cmd)
+      payload = { action: cmd.action, value: next }
+      label = `${cmd.title}: ${next ? 'вкл' : 'выкл'}`
+    }
+    await answer(`⏳ ${label}`)
+    await runCommand(chatId, messageId, device, payload, label)
     return
   }
 
-  if (kind === 'confirm' && action === 'reboot') {
-    await publishCommand(chatId, alias, { action: 'reboot' })
-    return
-  }
-
-  if (kind === 'confirm' && action === 'cancel') {
-    await sendDeviceStatus(chatId, alias || defaultAlias)
+  if (kind === 'r') {
+    const value = Number(valueRaw)
+    if (!Number.isFinite(value)) {
+      await answer()
+      return
+    }
+    const clamped = clampRange(cmd, value)
+    await answer(`⏳ ${cmd.title}: ${clamped}`)
+    await runCommand(chatId, messageId, device, { action: cmd.action, value: clamped }, `${cmd.title}: ${clamped}`)
   }
 }
 
@@ -397,13 +481,82 @@ function resolveAlias(alias) {
 // ═══════════════════════════════════════════
 
 async function sendDeviceStatus(chatId, alias) {
+  await showDevice(chatId, resolveAlias(alias))
+}
+
+/** Карточка устройства: новое сообщение или правка существующего */
+async function showDevice(chatId, alias, messageId, note) {
   const device = state.get(resolveAlias(alias))
   if (!device) {
     await sendMessage(chatId, '❌ Устройство не найдено.', devicesKeyboard())
     return
   }
+  const text = formatDeviceStatus(device) + (note ? `\n\n${note}` : '')
+  await render(chatId, messageId, text, deviceKeyboard(device))
+}
 
-  await sendMessage(chatId, formatDeviceStatus(device), deviceKeyboard(device.alias))
+/**
+ * Отправить команду из кнопки и обновить карточку, когда устройство
+ * ответит телеметрией (прошивки публикуют её сразу после команды).
+ */
+async function runCommand(chatId, messageId, device, payload, label) {
+  if (!validatePayload(payload)) {
+    await sendMessage(chatId, '❌ Команда заполнена некорректно.')
+    return
+  }
+
+  const waiter = waitForTelemetry(device.deviceId, 4000)
+  try {
+    await mqttPublish(`devices/${device.deviceId}/command`, payload)
+  } catch (error) {
+    waiter.cancel()
+    await showDevice(chatId, device.alias, messageId, `❌ Не удалось отправить: ${escapeHtml(error.message)}`)
+    return
+  }
+
+  if (payload.action === 'reboot') {
+    waiter.cancel()
+    await showDevice(chatId, device.alias, messageId, `🔄 <i>${escapeHtml(label)} — команда отправлена</i>`)
+    return
+  }
+
+  const answered = await waiter.promise
+  const note = answered
+    ? `✅ <i>${escapeHtml(label)}</i>`
+    : `📨 <i>${escapeHtml(label)} — отправлено, ответа пока нет</i>`
+  await showDevice(chatId, device.alias, messageId, note)
+}
+
+function waitForTelemetry(deviceId, timeoutMs) {
+  let entry
+  const promise = new Promise((resolve) => {
+    const timer = setTimeout(() => finish(false), timeoutMs)
+    const finish = (ok) => {
+      clearTimeout(timer)
+      const list = telemetryWaiters.get(deviceId) ?? []
+      telemetryWaiters.set(deviceId, list.filter((w) => w !== entry))
+      resolve(ok)
+    }
+    entry = finish
+    telemetryWaiters.set(deviceId, [...(telemetryWaiters.get(deviceId) ?? []), entry])
+  })
+  return { promise, cancel: () => entry(false) }
+}
+
+function resolveTelemetryWaiters(deviceId) {
+  for (const finish of telemetryWaiters.get(deviceId) ?? []) finish(true)
+}
+
+function mqttPublish(topic, payload) {
+  return new Promise((resolve, reject) => {
+    if (!mqttClient.connected) {
+      reject(new Error('нет связи с MQTT-брокером'))
+      return
+    }
+    mqttClient.publish(topic, JSON.stringify(payload), { qos: 1 }, (error) =>
+      error ? reject(error) : resolve(),
+    )
+  })
 }
 
 async function publishCommand(chatId, alias, payload) {
@@ -412,25 +565,7 @@ async function publishCommand(chatId, alias, payload) {
     await sendMessage(chatId, '❌ Устройство не найдено.', devicesKeyboard())
     return
   }
-
-  if (!validatePayload(payload)) {
-    await sendMessage(chatId, '❌ Команда заполнена некорректно.')
-    return
-  }
-
-  const topic = `devices/${device.deviceId}/command`
-  mqttClient.publish(topic, JSON.stringify(payload), { qos: 1 }, async (error) => {
-    if (error) {
-      await sendMessage(chatId, `❌ Не удалось отправить команду: ${escapeHtml(error.message)}`)
-      return
-    }
-
-    await sendMessage(
-      chatId,
-      `✅ Команда отправлена в <b>${escapeHtml(device.alias)}</b>\n<code>${escapeHtml(JSON.stringify(payload))}</code>`,
-      deviceKeyboard(device.alias),
-    )
-  })
+  await runCommand(chatId, undefined, device, payload, JSON.stringify(payload))
 }
 
 // ═══════════════════════════════════════════
@@ -439,76 +574,111 @@ async function publishCommand(chatId, alias, payload) {
 
 function formatDeviceStatus(device) {
   const telemetry = device.telemetry ?? {}
-  const groups = groupMetrics(telemetry)
-
   const lines = [
-    `<b>${escapeHtml(device.alias)}</b>`,
-    `<code>${escapeHtml(device.deviceId)}</code>`,
-    '',
+    `${deviceEmoji(device)} <b>${escapeHtml(device.alias)}</b>  ·  ${statusLabel(device)}`,
+    `<code>${escapeHtml(device.deviceId)}</code>` +
+      (device.updatedAt ? `  ·  ${timeAgo(device.updatedAt)}` : ''),
   ]
 
-  // ── Status line ──
-  let statusLine = `Статус: ${statusEmoji(device.status)} <b>${escapeHtml(device.status)}</b>`
-  if (device.updatedAt) {
-    statusLine += `  ·  обновлено ${timeAgo(device.updatedAt)}`
-  }
-  lines.push(statusLine)
-
   if (device.unresponsive) {
-    lines.push('')
-    lines.push('⚠️ <b>Не выходит на связь — возможно, офлайн</b>')
+    lines.push('', '⚠️ <b>Не выходит на связь — возможно, офлайн</b>')
   }
-
   if (device.lastError) {
-    lines.push('')
-    lines.push(`🚨 <b>Ошибка:</b> <code>${escapeHtml(device.lastError)}</code>`)
+    lines.push('', `🚨 <b>Ошибка</b>\n<code>${escapeHtml(device.lastError)}</code>`)
   }
 
-  // ── Network section ──
-  if (groups.network.length > 0) {
-    lines.push('')
-    lines.push('🌐 <b>Сеть</b>')
-    for (const [key, label, value] of groups.network) {
-      const formatted = formatValue(value, key)
-      const bar = key === 'rssi' ? ' ' + rssiBar(value) : ''
-      lines.push(`  📶 ${label}: <code>${escapeHtml(formatted)}</code>${bar}`)
-    }
+  const groups = buildMetricGroups(device)
+  if (groups.length === 0 && Object.keys(telemetry).length === 0) {
+    lines.push('', '<i>Телеметрии пока нет</i>')
   }
 
-  // ── System section ──
-  if (groups.system.length > 0) {
-    lines.push('')
-    lines.push('💻 <b>Система</b>')
-    for (const [key, label, value] of groups.system) {
-      const formatted = formatValue(value, key)
-      const bar = (key === 'heap' || key === 'free_heap') && telemetry.heap
-        ? ' ' + heapBar(telemetry.free_heap, telemetry.heap)
-        : ''
-      lines.push(`  ⏱ ${label}: <code>${escapeHtml(formatted)}</code>${bar}`)
-    }
-  }
-
-  // ── Environment section ──
-  if (groups.environment.length > 0) {
-    lines.push('')
-    lines.push('🌡️ <b>Окружение</b>')
-    for (const [key, label, value] of groups.environment) {
-      const formatted = formatValue(value, key)
-      lines.push(`  🌡️ ${label}: <code>${escapeHtml(formatted)}</code>`)
-    }
-  }
-
-  // ── OTA section ──
-  if (groups.ota.length > 0) {
-    lines.push('')
-    lines.push('📦 <b>OTA</b>')
-    for (const [key, label, value] of groups.ota) {
-      const formatted = formatValue(value, key)
-      lines.push(`  📦 ${label}: <code>${escapeHtml(formatted)}</code>`)
-    }
+  for (const group of groups) {
+    lines.push('', `<b>${groupEmoji(group.name)} ${escapeHtml(group.name)}</b>`)
+    const rows = group.items.map(({ def, value }) => {
+      const bar = metricBar(def, value)
+      return `${metricEmoji(def)} ${escapeHtml(def.label)}: <b>${escapeHtml(formatMetric(def, value))}</b>${bar ? '  ' + bar : ''}`
+    })
+    lines.push(`<blockquote>${rows.join('\n')}</blockquote>`)
   }
 
   return lines.join('\n')
+}
+
+/**
+ * Группы метрик: по схеме из capabilities.metrics (как в админке),
+ * а без неё — по известным ключам телеметрии.
+ */
+function buildMetricGroups(device) {
+  const telemetry = device.telemetry ?? {}
+  const defs = device.capabilities?.metrics?.length
+    ? device.capabilities.metrics
+    : FALLBACK_METRICS
+
+  const byGroup = new Map()
+  const sorted = [...defs]
+    .filter((d) => d && typeof d.key === 'string' && !d.hidden)
+    .sort((a, b) => (a.order ?? 999) - (b.order ?? 999))
+
+  for (const def of sorted) {
+    const value = metricValue(telemetry, def)
+    if (value === undefined || value === null || value === '') continue
+    const name = def.group || 'Прочее'
+    if (!byGroup.has(name)) byGroup.set(name, [])
+    byGroup.get(name).push({ def: { ...def, label: def.label || def.key }, value })
+  }
+
+  return [...byGroup.entries()].map(([name, items]) => ({ name, items }))
+}
+
+function metricValue(telemetry, def) {
+  for (const key of [def.key, ...(def.keys ?? [])]) {
+    if (telemetry[key] !== undefined) return telemetry[key]
+  }
+  return undefined
+}
+
+const FALLBACK_METRICS = [
+  { key: 'ip', keys: ['ip_address'], label: 'IP-адрес', icon: 'globe', group: 'Сеть', order: 0 },
+  { key: 'rssi', keys: ['wifi_rssi'], label: 'Сигнал Wi-Fi', icon: 'signal', format: 'rssi', group: 'Сеть', order: 1 },
+  { key: 'uptime', label: 'Аптайм', icon: 'clock', format: 'uptime', group: 'Система', order: 2 },
+  { key: 'free_heap', keys: ['heap'], label: 'Свободная RAM', icon: 'memory', format: 'bytes', group: 'Система', order: 3 },
+  { key: 'fw_version', label: 'Прошивка', icon: 'cpu', group: 'Система', order: 4 },
+  { key: 'temperature', keys: ['temp'], label: 'Температура', icon: 'thermometer', format: 'temperature', group: 'Окружение', order: 5 },
+  { key: 'humidity', label: 'Влажность', icon: 'droplets', format: 'percent', group: 'Окружение', order: 6 },
+  { key: 'ota', label: 'Статус', group: 'OTA', order: 7 },
+  { key: 'progress', label: 'Прогресс', format: 'percent', group: 'OTA', order: 8 },
+]
+
+function formatMetric(def, value) {
+  const format = def.format ?? inferFormat(def.key)
+  if (format === 'boolean' || typeof value === 'boolean') return truthy(value) ? 'вкл' : 'выкл'
+  if (typeof value !== 'number') return String(value)
+  if (format === 'uptime') return formatUptime(Math.floor(value))
+  if (format === 'bytes') return formatBytes(value)
+  if (format === 'rssi') return `${Math.round(value)} dBm`
+  if (format === 'temperature') return `${value.toFixed(1)} °C`
+  if (format === 'percent') return `${Math.round(value)} %`
+  const num = Number.isInteger(value)
+    ? value.toLocaleString('ru-RU')
+    : value.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
+  return def.unit ? `${num} ${def.unit}` : num
+}
+
+function inferFormat(key) {
+  if (key === 'uptime') return 'uptime'
+  if (key === 'heap' || key === 'free_heap') return 'bytes'
+  if (key === 'rssi') return 'rssi'
+  if (key === 'temperature' || key === 'temp') return 'temperature'
+  if (key === 'humidity' || key === 'progress') return 'percent'
+  return undefined
+}
+
+function metricBar(def, value) {
+  if (typeof value !== 'number') return ''
+  const format = def.format ?? inferFormat(def.key)
+  if (format === 'rssi') return rssiBar(value)
+  if (format === 'percent') return progressBar(value, 100, 8)
+  return ''
 }
 
 function formatOtaNotification(alias, telemetry) {
@@ -532,8 +702,8 @@ function helpText() {
     '',
     '📟 <code>/devices</code> — список устройств',
     '📊 <code>/dashboard</code> или <code>/all</code> — сводка по всем',
-    'ℹ️ <code>/status [device]</code> — статус устройства',
-    '🎮 <code>/commands</code> — список команд кнопками',
+    'ℹ️ <code>/status [device]</code> — карточка устройства с кнопками',
+    '🎮 <code>/commands [device]</code> — то же, что /status',
     '',
     '━━ <b>Действия</b>',
     '',
@@ -555,79 +725,62 @@ function helpText() {
   ].join('\n')
 }
 
-function commandsText() {
-  return [
-    '<b>Доступные действия</b>',
-    '',
-    'Выберите действие для устройства по умолчанию или используйте команды из меню.',
-  ].join('\n')
-}
-
 function dashboardText() {
-  const online = []
-  const offline = []
-  const unknown = []
-  const unresponsive = []
+  const all = [...state.values()]
+  if (all.length === 0) return '📊 <b>Сводка</b>\n\nНет зарегистрированных устройств.'
 
-  for (const device of state.values()) {
-    if (device.status === 'online') {
-      if (device.unresponsive) {
-        unresponsive.push(device)
-      } else {
-        online.push(device)
-      }
-    } else if (device.status === 'offline' || device.status === 'error') {
-      offline.push(device)
-    } else {
-      unknown.push(device)
-    }
-  }
+  const count = (fn) => all.filter(fn).length
+  const online = count((d) => d.status === 'online' && !d.unresponsive)
+  const silent = count((d) => d.unresponsive)
+  const offline = count((d) => d.status === 'offline' || d.status === 'error')
 
-  const lines = [
-    '📊 <b>Сводка по устройствам</b>',
-    '',
-    ...(online.length > 0
-      ? [`🟢 <b>В сети:</b> ${online.length}`]
-      : []),
-    ...(unresponsive.length > 0
-      ? [`⚠️ <b>Не отвечают:</b> ${unresponsive.length}`]
-      : []),
-    ...(offline.length > 0
-      ? [`🔴 <b>Офлайн:</b> ${offline.length}`]
-      : []),
-    ...(unknown.length > 0
-      ? [`🔔 <b>Неизвестно:</b> ${unknown.length}`]
-      : []),
-    '',
-  ]
+  const counters = [
+    `🟢 ${online}`,
+    ...(silent ? [`⚠️ ${silent}`] : []),
+    ...(offline ? [`🔴 ${offline}`] : []),
+    ...(all.length - online - silent - offline > 0 ? [`⚪️ ${all.length - online - silent - offline}`] : []),
+  ].join('   ')
 
-  if (state.size === 0) {
-    lines.push('Нет зарегистрированных устройств.')
-    return lines.join('\n')
-  }
+  const lines = ['📊 <b>Сводка по устройствам</b>', counters, '']
 
-  lines.push('<b>Подробно:</b>')
-  for (const device of state.values()) {
-    const emoji = device.unresponsive
-      ? '⚠️'
-      : device.status === 'online'
-        ? '🟢'
-        : device.status === 'offline'
-          ? '🔴'
-          : '🔔'
-
-    const telemParts = []
-    const t = device.telemetry ?? {}
-    if (t.temperature !== undefined) telemParts.push(`${formatValue(t.temperature, 'temperature')}`)
-    if (t.humidity !== undefined) telemParts.push(`${formatValue(t.humidity, 'humidity')}`)
-    if (t.rssi !== undefined) telemParts.push(`${formatValue(t.rssi, 'rssi')}`)
-
-    const extra = telemParts.length > 0 ? `  ·  ${telemParts.join('  ·  ')}` : ''
-    const ago = device.updatedAt ? ` (${timeAgo(device.updatedAt)})` : ''
-    lines.push(`${emoji} <b>${escapeHtml(device.alias)}</b>${extra}${ago}`)
+  for (const device of all) {
+    lines.push(`${deviceEmoji(device)} <b>${escapeHtml(device.alias)}</b>` +
+      (device.updatedAt ? `  <i>${timeAgo(device.updatedAt)}</i>` : ''))
+    const summary = summaryParts(device)
+    if (summary.length) lines.push(`<blockquote>${summary.join('  ·  ')}</blockquote>`)
   }
 
   return lines.join('\n')
+}
+
+/** Короткая строка метрик для сводки: dashboard.summary из скетча или dashboard:true */
+function summaryParts(device) {
+  const telemetry = device.telemetry ?? {}
+  const caps = device.capabilities
+  const defs = caps?.metrics?.length ? caps.metrics : FALLBACK_METRICS
+  const byKey = new Map(defs.map((d) => [d.key, d]))
+
+  let keys = Array.isArray(caps?.dashboard?.summary) ? caps.dashboard.summary : null
+  if (!keys) {
+    keys = caps?.metrics?.length
+      ? defs.filter((d) => d.dashboard).map((d) => d.key)
+      : ['temperature', 'humidity', 'rssi', 'uptime']
+  }
+  const max = Number(caps?.dashboard?.max_items) || 4
+
+  const parts = []
+  for (const key of keys) {
+    const def = byKey.get(key) ?? { key, label: key }
+    const value = metricValue(telemetry, def)
+    if (value === undefined || value === null || value === '') continue
+    parts.push(`${metricEmoji(def)} ${escapeHtml(formatMetric(def, value))}`)
+    if (parts.length >= max) break
+  }
+  return parts
+}
+
+function devicesText() {
+  return '📟 <b>Устройства</b>\n\nВыберите устройство:'
 }
 
 // ═══════════════════════════════════════════
@@ -649,56 +802,173 @@ function mainKeyboard() {
 }
 
 function devicesKeyboard() {
-  const aliases = [...devices.keys()]
+  const list = [...state.values()]
   const rows = []
-
-  for (let i = 0; i < aliases.length; i += 2) {
-    const row = [
-      { text: aliases[i], callback_data: `device:${aliases[i]}` },
-    ]
-    if (aliases[i + 1]) {
-      row.push({ text: aliases[i + 1], callback_data: `device:${aliases[i + 1]}` })
-    }
-    rows.push(row)
+  for (let i = 0; i < list.length; i += 2) {
+    rows.push(
+      list.slice(i, i + 2).map((d) => ({
+        text: `${deviceEmoji(d)} ${d.alias}`,
+        callback_data: `dev:${d.alias}`,
+      })),
+    )
   }
-
+  rows.push([
+    { text: '📊 Сводка', callback_data: 'dash' },
+    { text: '⟳ Обновить', callback_data: 'devs' },
+  ])
   return { inline_keyboard: rows }
 }
 
-function deviceKeyboard(alias) {
-  return {
-    inline_keyboard: [
-      [
-        { text: '⟳ Обновить', callback_data: `cmd:status:${alias}` },
-        { text: '📸 Снимок', callback_data: `cmd:capture:${alias}` },
-      ],
-      [
-        { text: '💡 LED вкл', callback_data: `cmd:led_on:${alias}` },
-        { text: '💡 LED выкл', callback_data: `cmd:led_off:${alias}` },
-      ],
-      [
-        { text: '← Назад к устройствам', callback_data: 'devices' },
-      ],
-    ],
-  }
+/** Команды устройства из retained capabilities (как в админке) */
+function deviceCommands(device) {
+  return device.capabilities?.commands ?? []
 }
 
-function commandsKeyboard() {
-  return {
-    inline_keyboard: [
-      [
-        { text: '💡 LED вкл', callback_data: `cmd:led_on:${defaultAlias}` },
-        { text: '💡 LED выкл', callback_data: `cmd:led_off:${defaultAlias}` },
-      ],
-      [
-        { text: '📸 Снимок', callback_data: `cmd:capture:${defaultAlias}` },
-        { text: '🔄 Перезагрузка', callback_data: `confirm:reboot:${defaultAlias}` },
-      ],
-      [
-        { text: '← Назад', callback_data: 'checkin:dashboard' },
-      ],
-    ],
+/**
+ * Клавиатура строится из capabilities конкретного устройства:
+ *  toggle  — одна кнопка с текущим состоянием, нажатие переключает
+ *  range   — ➖ [значение] ➕ с шагом step (по умолчанию 10% диапазона)
+ *  trigger — кнопка; опасные (reboot и т.п.) через подтверждение
+ */
+function deviceKeyboard(device) {
+  const alias = device.alias
+  const rows = []
+  const pending = []
+  const flush = () => {
+    for (let i = 0; i < pending.length; i += 2) rows.push(pending.slice(i, i + 2))
+    pending.length = 0
   }
+
+  deviceCommands(device).forEach((cmd, idx) => {
+    if (cmd.type === 'toggle') {
+      const on = toggleValue(device, cmd)
+      const stateText = on === undefined ? '' : on ? ' · вкл' : ' · выкл'
+      pending.push({
+        text: `${on ? '🟢' : on === false ? '⚫️' : commandEmoji(cmd)} ${cmd.title}${stateText}`,
+        callback_data: `c:${alias}:${idx}`,
+      })
+      return
+    }
+
+    if (cmd.type === 'range') {
+      flush()
+      const current = rangeValue(device, cmd)
+      const step = rangeStep(cmd)
+      const base = current ?? cmd.min ?? 0
+      rows.push([
+        { text: '➖', callback_data: `r:${alias}:${idx}:${clampRange(cmd, base - step)}` },
+        {
+          text: `${commandEmoji(cmd)} ${cmd.title}${current !== undefined ? ` · ${current}` : ''}`,
+          callback_data: 'noop',
+        },
+        { text: '➕', callback_data: `r:${alias}:${idx}:${clampRange(cmd, base + step)}` },
+      ])
+      return
+    }
+
+    pending.push({
+      text: `${commandEmoji(cmd)} ${cmd.title}`,
+      callback_data: isDangerous(cmd) ? `ask:${alias}:${idx}` : `c:${alias}:${idx}`,
+    })
+  })
+
+  const hasCaptureCmd = deviceCommands(device).some((c) => c.action === 'capture')
+  if (!hasCaptureCmd && (device.telemetry?.capture_url || device.telemetry?.camera_ready !== undefined)) {
+    pending.push({ text: '📸 Снимок', callback_data: `cap:${alias}` })
+  }
+  flush()
+
+  rows.push([
+    { text: '⟳ Обновить', callback_data: `ref:${alias}` },
+    { text: '← Устройства', callback_data: 'devs' },
+  ])
+  return { inline_keyboard: rows }
+}
+
+function toggleValue(device, cmd) {
+  const raw = device.telemetry?.[cmd.action]
+  if (raw === undefined || raw === null) return undefined
+  return truthy(raw)
+}
+
+function rangeValue(device, cmd) {
+  const raw = Number(device.telemetry?.[cmd.action])
+  return Number.isFinite(raw) ? raw : undefined
+}
+
+function rangeStep(cmd) {
+  if (Number(cmd.step) > 0) return Number(cmd.step)
+  const min = Number.isFinite(cmd.min) ? cmd.min : 0
+  const max = Number.isFinite(cmd.max) ? cmd.max : 100
+  return Math.max(1, Math.round((max - min) / 10))
+}
+
+function clampRange(cmd, value) {
+  const min = Number.isFinite(cmd.min) ? cmd.min : 0
+  const max = Number.isFinite(cmd.max) ? cmd.max : 100
+  return Math.round(Math.max(min, Math.min(max, value)))
+}
+
+function isDangerous(cmd) {
+  return /reboot|restart|reset|format|erase|ota/i.test(cmd.action)
+}
+
+function normalizeCapabilities(payload) {
+  if (!payload || typeof payload !== 'object') return null
+  const commands = Array.isArray(payload.commands)
+    ? payload.commands.filter((c) => c && typeof c.action === 'string')
+        .map((c) => ({ ...c, title: c.title || c.action }))
+    : []
+  const metrics = Array.isArray(payload.metrics) ? payload.metrics : []
+  const dashboard = payload.dashboard && typeof payload.dashboard === 'object' ? payload.dashboard : null
+  return { commands, metrics, dashboard }
+}
+
+// ── Emoji ────────────────────────────────────
+
+const ICON_EMOJI = {
+  lightbulb: '💡', 'rotate-cw': '🔄', 'refresh-cw': '🔄', zap: '⚡️', send: '📤',
+  camera: '📸', power: '⏻', fan: '🌀', bell: '🔔', circle: '⚪️', dot: '⚪️',
+  sun: '☀️', thermometer: '🌡️', globe: '🌐', signal: '📶', wifi: '📶',
+  clock: '⏱', memory: '🧠', cpu: '🔧', droplets: '💧', battery: '🔋', gauge: '📈',
+}
+
+function commandEmoji(cmd) {
+  return ICON_EMOJI[cmd.icon] ?? (cmd.action === 'reboot' ? '🔄' : '⚡️')
+}
+
+function metricEmoji(def) {
+  return ICON_EMOJI[def.icon] ?? '▫️'
+}
+
+function groupEmoji(name) {
+  const n = name.toLowerCase()
+  if (n.includes('сет')) return '🌐'
+  if (n.includes('систем')) return '💻'
+  if (n.includes('окруж') || n.includes('климат')) return '🌡️'
+  if (n.includes('ota')) return '📦'
+  if (n.includes('камер')) return '📸'
+  return '📍'
+}
+
+function deviceEmoji(device) {
+  if (device.unresponsive) return '⚠️'
+  return statusEmoji(device.status)
+}
+
+function statusLabel(device) {
+  if (device.unresponsive) return 'не отвечает'
+  if (device.status === 'online') return 'в сети'
+  if (device.status === 'offline') return 'офлайн'
+  if (device.status === 'error') return 'ошибка'
+  return 'нет данных'
+}
+
+function truthy(value) {
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') return value !== 0
+  if (typeof value === 'string') return ['true', '1', 'on'].includes(value.toLowerCase().trim())
+  return Boolean(value)
 }
 
 // ═══════════════════════════════════════════
@@ -709,7 +979,7 @@ function statusEmoji(status) {
   if (status === 'online') return '🟢'
   if (status === 'offline') return '🔴'
   if (status === 'error') return '🚨'
-  return '🔔'
+  return '⚪️'
 }
 
 function timeAgo(date) {
@@ -738,77 +1008,6 @@ function rssiBar(rssi) {
   const normalized = Math.max(0, Math.min(100, ((rssi + 100) / 70) * 100))
   const filled = Math.round((normalized / 100) * 8)
   return '█'.repeat(filled) + '░'.repeat(8 - filled)
-}
-
-function heapBar(free, total) {
-  if (!total || total <= 0) return ''
-  const used = total - free
-  const pct = (used / total) * 100
-  const filled = Math.round((pct / 100) * 8)
-  return '█'.repeat(filled) + '░'.repeat(8 - filled)
-}
-
-function groupMetrics(telemetry) {
-  const groups = {
-    network: [],
-    system: [],
-    environment: [],
-    ota: [],
-  }
-
-  if (telemetry == null || typeof telemetry !== 'object') return groups
-
-  for (const [key, value] of Object.entries(telemetry)) {
-    if (value === null || value === undefined) continue
-
-    if (key === 'rssi') {
-      groups.network.push([key, 'RSSI', value])
-    } else if (key === 'ip' || key === 'ip_address') {
-      groups.network.push([key, 'IP', value])
-    } else if (key === 'uptime') {
-      groups.system.push([key, 'Время работы', value])
-    } else if (key === 'heap') {
-      groups.system.push([key, 'Всего RAM', value])
-    } else if (key === 'free_heap') {
-      groups.system.push([key, 'Свободно RAM', value])
-    } else if (key === 'temperature' || key === 'temp') {
-      groups.environment.push([key, 'Температура', value])
-    } else if (key === 'humidity') {
-      groups.environment.push([key, 'Влажность', value])
-    } else if (key === 'ota') {
-      groups.ota.push([key, 'Статус', value])
-    } else if (key === 'progress') {
-      groups.ota.push([key, 'Прогресс', value])
-    }
-  }
-
-  return groups
-}
-
-function labelForKey(key) {
-  const labels = {
-    uptime: 'Время работы',
-    rssi: 'Сигнал Wi-Fi',
-    heap: 'Свободная RAM',
-    free_heap: 'Свободная RAM',
-    temperature: 'Температура',
-    temp: 'Температура',
-    humidity: 'Влажность',
-    ota: 'OTA',
-    progress: 'Прогресс',
-  }
-  return labels[key] ?? key
-}
-
-function formatValue(value, key) {
-  if (value === null || value === undefined) return '—'
-  if (typeof value !== 'number') return String(value)
-  if (key === 'uptime') return formatUptime(Math.floor(value))
-  if (key === 'heap' || key === 'free_heap') return formatBytes(value)
-  if (key === 'rssi') return `${Math.round(value)} dBm`
-  if (key === 'temperature' || key === 'temp') return `${value.toFixed(1)} °C`
-  if (key === 'humidity' || key === 'progress') return `${Math.round(value)} %`
-  return Number.isInteger(value) ? value.toLocaleString('ru-RU') : value.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
 }
 
 function formatUptime(seconds) {
@@ -905,6 +1104,26 @@ async function sendMessage(chatId, text, replyMarkup) {
     disable_web_page_preview: true,
     ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
   })
+}
+
+/** Правит сообщение с кнопкой (если есть), иначе отправляет новое */
+async function render(chatId, messageId, text, replyMarkup) {
+  if (messageId) {
+    try {
+      return await telegram('editMessageText', {
+        chat_id: chatId,
+        message_id: messageId,
+        text,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+        ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+      })
+    } catch (error) {
+      if (/message is not modified/i.test(error.message)) return
+      // Сообщение слишком старое/удалено — отправим новое
+    }
+  }
+  return sendMessage(chatId, text, replyMarkup)
 }
 
 async function sendPhoto(chatId, url, replyMarkup) {
