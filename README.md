@@ -174,10 +174,41 @@ mosquitto_pub -h <IP_Pi> -p 1883 -u esp32 -P <pass> \
 3. Импортируй `node-red/flows.example.json` (Menu → Import).
 4. Flow подписывается на `devices/+/status`, `devices/+/telemetry`,
    `devices/+/capabilities` и `devices/#` (audit log → `mqtt_events`), преобразует
-   payload и делает upsert/insert в Supabase через PostgREST.
+   payload и пишет в Supabase через PostgREST: статус — `POST /rpc/set_device_status`,
+   телеметрия — insert в `telemetry` + `rpc/touch_device`, capabilities —
+   `rpc/merge_device_commands`.
    Внимание: эти подписки пересекаются — без `allow_duplicate_messages false`
    в `mosquitto.conf` каждое сообщение придёт дважды (см. раздел 2).
 5. Нажми **Deploy**.
+
+> Статус **обязательно** должен писаться через `rpc/set_device_status`, а не
+> прямым upsert `POST /devices?on_conflict=device_id` (так делали старые
+> версии flow). Только RPC снимает «надгробие» из `deleted_devices` при свежем
+> `online`; прямой upsert молча отбрасывает триггер `devices_block_deleted`
+> (скрипт 008) — удалённое устройство больше никогда не вернётся в админку.
+> См. [«Удалённое устройство не возвращается»](#-удалённое-устройство-не-возвращается).
+
+### Обновить flow на уже работающем Pi
+
+Развёрнутый flow лежит в `node-red/data/flows.json` — он в `.gitignore`, и
+`git pull` его не трогает. Изменения из `flows.example.json` переносятся
+вручную: либо импортом в редакторе (Menu → Import → «Replace» существующих
+узлов → **Deploy**), либо скриптом для узла статуса:
+
+```bash
+cd ~/esp-32-gateway-pi4          # корень репозитория на Pi
+git pull
+python3 scripts/fix-nodered-status-rpc.py --dry-run   # показать, что изменится
+python3 scripts/fix-nodered-status-rpc.py             # применить (делает flows.json.bak-<время>)
+docker compose restart nodered                        # только Node-RED, остальной стек не трогаем
+```
+
+Скрипт находит function-узел за `mqtt in` `devices/+/status`, подставляет в
+него код `fn-status` из `flows.example.json` и переводит следующий за ним
+`http request` в режим `method: use` (метод и URL задаёт function-узел).
+Если в других узлах остался прямой upsert в `/devices`, скрипт это покажет.
+После перезапуска обнови вкладку редактора Node-RED — иначе Deploy из старой
+вкладки перезапишет исправленный flow.
 
 Проверка: опубликуй тестовое сообщение (см. выше) — в Debug-панели Node-RED
 появится ответ PostgREST, а в таблице `devices` — новая запись. Сообщение также
@@ -571,7 +602,8 @@ components/              # UI и дашборд
 lib/                     # supabase-клиент, auth (HMAC-cookie), mqtt-паблишер
 scripts/                 # SQL-миграции 001–010 (схема, retention, обслуживание)
 mosquitto/config/        # конфиг + ACL брокера
-node-red/                # пример flow
+node-red/                # пример flow (развёрнутый node-red/data/ — вне git)
+scripts/fix-nodered-status-rpc.py  # перевод статуса в развёрнутом flow на rpc/set_device_status
 telegram-bot/            # Telegram ↔ MQTT bridge (+ avatar.svg, avatar.png)
 firmware/                # пример прошивки ESP32
 Dockerfile               # standalone-сборка админки
@@ -617,6 +649,62 @@ docker-compose.yml       # единый стек
 2. Проверь Mosquitto: `docker compose logs mosquitto`.
 3. Проверь Node-RED: открыть `http://<IP_Pi>:1880`, посмотреть Debug-панель.
 4. Убедись, что в таблице `devices` появилась запись с `device_id`.
+5. Если устройство когда-то удаляли из админки — см. следующий пункт.
+
+### ♻️ Удалённое устройство не возвращается
+
+Симптом: устройство публикует в MQTT (сообщения есть в `mqtt_events` и на
+`/dashboard/traffic`), но в `devices` строки нет и `telemetry` не пишется.
+
+**Причина:** `device_id` лежит в `deleted_devices`. «Надгробие» снимает только
+`set_device_status(p_device_id, p_is_online => true)` (скрипт 006): при свежем
+`online` функция удаляет запись из `deleted_devices` и делает upsert в
+`devices`. Если flow пишет статус прямым `POST /devices?on_conflict=device_id`,
+триггер `devices_block_deleted` (008) молча отбрасывает вставку, а телеметрия
+падает на внешнем ключе `telemetry.device_id → devices.device_id`.
+
+**Решение:** переведи flow на RPC (см.
+[«Обновить flow на уже работающем Pi»](#обновить-flow-на-уже-работающем-pi)).
+Надгробия руками не удаляй — это сделает сама функция.
+
+Проверка до исправления — какие устройства сейчас «похоронены»:
+
+```sql
+select dd.device_id, dd.deleted_at,
+       (select max(created_at) from public.mqtt_events e
+         where e.device_id = dd.device_id) as last_mqtt
+from public.deleted_devices dd
+order by last_mqtt desc nulls last;
+```
+
+После `docker compose restart nodered` Node-RED переподписывается и получает
+retained `devices/<id>/status`. Устройства, которые переподключались к брокеру
+после удаления (и, значит, заново опубликовали retained `online`), вернутся
+сразу. Остальные — после ближайшего переподключения/перезагрузки платы.
+Учти: вернутся **все** работающие устройства из `deleted_devices`, в том числе
+удалённые намеренно, — так устроено правило «свежий online = устройство снова
+в строю». Такие платы нужно выключить (или сменить им hostname).
+
+Проверка после исправления (`<id>` — например `esp32-cam`):
+
+```bash
+# статус должен уходить в rpc/set_device_status — в Debug-панели Node-RED
+# ответ http-узла без ошибок (204 / пустое тело)
+docker compose logs --since 5m nodered | grep -i -E 'error|40[0-9]'
+```
+
+```sql
+select * from public.deleted_devices where device_id = '<id>';  -- 0 строк
+select device_id, is_online, last_seen from public.devices
+ where device_id = '<id>';                                       -- 1 строка, is_online = true
+select count(*), max(created_at) from public.telemetry
+ where device_id = '<id>' and created_at > now() - interval '5 minutes';
+                                                                 -- растёт раз в ~10 с
+```
+
+Если плата давно не переподключалась, перезагрузи её командой
+`{"action":"reboot"}` (кнопка в Telegram-боте или `mosquitto_pub` от
+`backend` в `devices/<id>/command`) — после загрузки она опубликует `online`.
 
 ### 🗑️ Устройство не удаляется: statement timeout
 
