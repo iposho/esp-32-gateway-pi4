@@ -67,7 +67,12 @@ flowchart LR
    (таблица `mqtt_events`, Realtime, retention-функция `cleanup_mqtt_events`).
 
    Для удаления устройств из админки выполни `scripts/006_deleted_devices.sql`
-   (без него Node-RED сразу пересоздаёт удалённое устройство из MQTT).
+   (без него Node-RED сразу пересоздаёт удалённое устройство из MQTT),
+   `scripts/007_purge_device_rows.sql` (история устройства удаляется
+   пачками — иначе на большой телеметрии удаление падает по
+   `statement timeout`) и `scripts/008_block_deleted_devices.sql`
+   (триггер, который не даёт вставить удалённое устройство никаким путём,
+   включая старые/кастомные flows Node-RED).
 
 2. **Узнать имя docker-сети** Supabase-стека:
    ```bash

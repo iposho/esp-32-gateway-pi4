@@ -13,6 +13,9 @@ import { isDeviceActive, type Device, type Telemetry } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
 
+/** Строк за один вызов purge_device_rows — с запасом до statement_timeout */
+const PURGE_BATCH_SIZE = 5000
+
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ deviceId: string }> },
@@ -186,7 +189,29 @@ export async function DELETE(
     }
   }
 
-  // 3. Удаляем устройство; telemetry и commands удаляются каскадом (FK)
+  // 3. Чистим историю пачками: одним каскадным DELETE сотни тысяч строк
+  //    телеметрии не укладываются в statement_timeout
+  //    (см. scripts/007_purge_device_rows.sql)
+  for (;;) {
+    const { data: purged, error: purgeError } = await supabase.rpc('purge_device_rows', {
+      p_device_id: deviceId,
+      p_limit: PURGE_BATCH_SIZE,
+    })
+
+    if (purgeError) {
+      console.error('[DELETE Device] Purge error:', purgeError.message)
+      return NextResponse.json(
+        {
+          error: `Не удалось очистить историю устройства: ${purgeError.message}. Примените scripts/007_purge_device_rows.sql`,
+        },
+        { status: 500 },
+      )
+    }
+
+    if (!purged) break
+  }
+
+  // 4. Удаляем устройство; оставшиеся строки (если успели прийти) — каскадом
   const { data: deleted, error } = await supabase
     .from('devices')
     .delete()
