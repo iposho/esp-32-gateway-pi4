@@ -13,6 +13,8 @@ export function safeEqual(a: string, b: string): boolean {
 export function isCameraRoute(pathname: string): boolean {
   return (
     pathname === '/api/camera/latest' ||
+    pathname === '/api/camera/birdfeeder' ||
+    pathname.startsWith('/api/camera/birdfeeder/') ||
     /^\/api\/devices\/[^/]+\/camera$/.test(pathname)
   )
 }
