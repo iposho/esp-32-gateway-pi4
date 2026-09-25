@@ -75,6 +75,14 @@ flowchart LR
    (триггер, который не даёт вставить удалённое устройство никаким путём,
    включая старые/кастомные flows Node-RED).
 
+   Дополнительно выполни `scripts/009_purge_speedup_and_autovacuum.sql`:
+   он снимает с функции 8-секундный `statement_timeout` роли PostgREST,
+   ускоряет пакетное удаление (поиск по `ctid` вместо повторного скана
+   по `id`) и включает агрессивный autovacuum для `telemetry`, чтобы
+   раздувание таблицы мёртвыми строками не возвращалось.
+   Скрипт создаёт функцию от имени `supabase_admin` — применяй его
+   от той же роли, иначе получишь `must be owner of function`.
+
 2. **Узнать имя docker-сети** Supabase-стека:
    ```bash
    docker network ls | grep supabase
