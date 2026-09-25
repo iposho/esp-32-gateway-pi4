@@ -100,6 +100,8 @@ services:
       TELEGRAM_POLL_TIMEOUT: ${TELEGRAM_POLL_TIMEOUT:-30}
       # Через сколько секунд тишины считать online-устройство пропавшим (0 — выключить)
       TELEGRAM_OFFLINE_TIMEOUT: ${TELEGRAM_OFFLINE_TIMEOUT:-120}
+      # Как часто (сек) обновлять список устройств, названия и порядок из админки
+      TELEGRAM_SYNC_INTERVAL: ${TELEGRAM_SYNC_INTERVAL:-60}
       MQTT_URL: mqtt://mosquitto:1883
       MQTT_USERNAME: ${TELEGRAM_MQTT_USERNAME:-telegram}
       MQTT_PASSWORD: ${TELEGRAM_MQTT_PASSWORD:-}
