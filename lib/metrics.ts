@@ -116,7 +116,7 @@ function formatMetricValue(
   }
 
   // Формат из схемы прошивки важнее догадок по имени ключа:
-  // camelion_temp — это проценты, а не °C
+  // например, *_temp может быть процентами, а не °C
   if (typeof value === 'number' && format && format !== 'number') {
     if (format === 'percent') return `${Math.round(value)} %`
     if (format === 'bytes') return formatValue(value, 'heap')
