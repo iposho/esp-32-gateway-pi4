@@ -621,3 +621,24 @@ begin
 end $$;
 delete from public.devices where device_id = '<device_id>';
 ```
+
+Удаление также стирает retained-сообщения устройства в брокере (`status`,
+`telemetry`, `capabilities`). Без этого Node-RED получает их при каждом
+переподключении и снова пишет в `mqtt_events` (а если устройство ещё есть
+в таблице — и в `telemetry`).
+
+Топики `devices/<id>/out/…` не чистятся: их имена задаёт прошивка, заранее
+их перечислить нельзя. Если устройство оставило там retained — убери вручную:
+
+```bash
+pw=$(grep -m1 '^MQTT_PASSWORD=' .env | cut -d= -f2- | tr -d '"')
+docker exec esp32-mosquitto mosquitto_pub -h localhost -u backend -P "$pw" \
+  -t 'devices/<id>/out/<name>' -r -n      # -r + -n = пустой retained
+```
+
+Проверить, что retained больше нет:
+
+```bash
+docker exec esp32-mosquitto mosquitto_sub -h localhost -u backend -P "$pw" \
+  -t 'devices/#' -W 5 -v --retained-only
+```

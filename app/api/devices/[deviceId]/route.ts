@@ -177,10 +177,14 @@ export async function DELETE(
     )
   }
 
-  // 2. Стираем retained status/capabilities в брокере, иначе они
-  //    прилетают в Node-RED при каждом переподключении
+  // 2. Стираем retained-сообщения устройства в брокере, иначе они
+  //    прилетают в Node-RED при каждом переподключении: status и
+  //    capabilities оседают в mqtt_events, а telemetry — ещё и в
+  //    таблице telemetry. Топики devices/<id>/out/… не чистим: их
+  //    имена задаёт прошивка, перечислить их заранее нельзя.
   const retainedResults = await Promise.allSettled([
     clearRetained(`devices/${deviceId}/status`),
+    clearRetained(`devices/${deviceId}/telemetry`),
     clearRetained(capabilitiesTopic(deviceId)),
   ])
   for (const r of retainedResults) {
