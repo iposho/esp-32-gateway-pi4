@@ -6,7 +6,7 @@
 зрителей сайта давало ESP32 не больше одного запроса в секунду.
 
 ```
-esp32-cam (LAN)                         Pi: esp32-admin                     kuzyak.in (Vercel)
+esp32-bird-cam (LAN)                         Pi: esp32-admin                     kuzyak.in (Vercel)
  ├ /latest.jpg  кадр из RAM, 1 fps ───▶ /api/camera/birdfeeder/frame  1 с ─▶ /api/birdfeeder/frame/?b=<окно 2 с>  CDN s-maxage=10
  ├ /photo?id=N  снимок птицы с SD ───▶ /api/camera/birdfeeder/bird   10 мин ▶ /api/birdfeeder/bird/?id=N        CDN 1 ч
  └ MQTT telemetry: bird_last_at, ──▶ Node-RED → Supabase ─▶ /api/camera/birdfeeder 5 с ▶ /api/birdfeeder/  CDN 5 с
@@ -33,8 +33,8 @@ esp32-cam (LAN)                         Pi: esp32-admin                     kuzy
 ```bash
 # уже есть — используется и балконным виджетом
 CAMERA_API_TOKEN=...
-# необязательно, по умолчанию esp32-cam
-BIRDFEEDER_DEVICE_ID=esp32-cam
+# необязательно, по умолчанию esp32-bird-cam
+BIRDFEEDER_DEVICE_ID=esp32-bird-cam
 ```
 
 ## Развёртывание
@@ -45,7 +45,7 @@ BIRDFEEDER_DEVICE_ID=esp32-cam
    ```bash
    cd ~/esp32-gateway-pi4        # путь к репозиторию на Pi
    git pull
-   grep -q '^BIRDFEEDER_DEVICE_ID=' .env || echo 'BIRDFEEDER_DEVICE_ID=esp32-cam' >> .env
+   grep -q '^BIRDFEEDER_DEVICE_ID=' .env || echo 'BIRDFEEDER_DEVICE_ID=esp32-bird-cam' >> .env
    docker compose up -d --build admin
    ```
    Остальные сервисы (mosquitto, nodered, telegram-bot, camelion-bridge) не трогаются.
@@ -58,7 +58,7 @@ BIRDFEEDER_DEVICE_ID=esp32-cam
    curl -s -o /dev/null -w '%{http_code}\n' https://esp32.kuzyak.in/api/camera/birdfeeder   # без токена → 401
    ```
    Ожидается: JSON с `"online": true`, кадр `200` размером 20–60 КБ.
-   Если `online: false` — камера не шлёт телеметрию (смотри `devices/esp32-cam/status` в MQTT).
+   Если `online: false` — камера не шлёт телеметрию (смотри `devices/esp32-bird-cam/status` в MQTT).
    Если `frame` → 503 при `online: true` — контейнер `admin` не видит LAN-IP камеры:
    `docker exec esp32-admin wget -qO- http://<ip-камеры>/ota.json`.
 4. **Сайт:** применить SQL из `sql/init.sql` репозитория `kuzyak.in` (колонка
@@ -67,7 +67,7 @@ BIRDFEEDER_DEVICE_ID=esp32-cam
 
 ## Калибровка детектора
 
-Страница камеры `http://esp32-cam.local/` показывает «Яркость», «Движение ‰»
+Страница камеры `http://esp32-bird-cam.local/` показывает «Яркость», «Движение ‰»
 и визиты. Пороги — константы `MOTION_*` / `DAYLIGHT_*` в `esp32_cam.ino`:
 
 - ложные визиты от веток/теней → поднять `MOTION_TRIGGER_PERMILLE` (20 → 30–40);
@@ -86,7 +86,7 @@ nodered, telegram-bot, camelion-bridge). Нужно раскатить подд�
 1. git status: если есть локальные изменения — остановись и покажи их мне, ничего не
    откатывай. Иначе git pull.
 2. В .env должен быть непустой CAMERA_API_TOKEN (не печатай его значение). Если нет
-   строки BIRDFEEDER_DEVICE_ID — допиши BIRDFEEDER_DEVICE_ID=esp32-cam. Другие строки .env
+   строки BIRDFEEDER_DEVICE_ID — допиши BIRDFEEDER_DEVICE_ID=esp32-bird-cam. Другие строки .env
    не меняй.
 3. Пересобери и перезапусти ТОЛЬКО сервис admin: docker compose up -d --build admin.
    Остальные контейнеры не перезапускай, volumes и сети не трогай, docker system prune
@@ -98,7 +98,7 @@ nodered, telegram-bot, camelion-bridge). Нужно раскатить подд�
    - GET .../api/camera/birdfeeder/frame с Bearer → код и размер ответа;
    - GET .../api/camera/birdfeeder без токена → должен быть 401;
    - если online=false — покажи последние сообщения mosquitto_sub -C 3 -W 30
-     -t devices/esp32-cam/# (пользователь backend, пароль из .env MQTT_PASSWORD);
+     -t devices/esp32-bird-cam/# (пользователь backend, пароль из .env MQTT_PASSWORD);
    - если frame=503 при online=true — проверь доступность IP камеры из контейнера
      (IP из last_photo_url в телеметрии): docker exec esp32-admin wget -qO- http://<ip>/ota.json
 6. Отчитайся коротко: что сделал, результаты каждой проверки, что не получилось.

@@ -2,7 +2,7 @@ import { getServiceClient } from '@/lib/supabase/server'
 import { isDeviceActive } from '@/lib/types'
 
 /**
- * Кормушка: камера (esp32-cam) сама делает кадр раз в секунду, ищет движение
+ * Кормушка: камера (esp32-bird-cam) сама делает кадр раз в секунду, ищет движение
  * и хранит снимки с птицами на SD. Шлюз ничего не считает — только
  * кэширует ответы камеры, чтобы любое число зрителей сайта давало
  * не больше одного запроса к ESP32 в секунду.
@@ -10,7 +10,7 @@ import { isDeviceActive } from '@/lib/types'
 
 /** Устройство-камера у кормушки */
 export function getBirdfeederDeviceId(): string {
-  return process.env.BIRDFEEDER_DEVICE_ID || 'esp32-cam'
+  return process.env.BIRDFEEDER_DEVICE_ID || 'esp32-bird-cam'
 }
 
 const STATE_TTL_MS = 5_000
