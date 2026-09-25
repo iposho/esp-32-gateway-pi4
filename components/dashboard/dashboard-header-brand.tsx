@@ -14,10 +14,10 @@ export function DashboardHeaderBrand() {
   const content = (
     <>
       <BrandLogo size={36} />
-      <div className="min-w-0">
-        <h1 className="text-base font-semibold leading-tight text-foreground">
+      <div className="hidden min-w-0 sm:block">
+        <p className="text-base font-semibold leading-tight text-foreground">
           ESP32 Gateway
-        </h1>
+        </p>
         <p className="text-xs text-muted-foreground">esp32.kuzyak.in</p>
       </div>
     </>
@@ -37,6 +37,7 @@ export function DashboardHeaderBrand() {
   return (
     <Link
       href={DASHBOARD_HOME}
+      aria-label="ESP32 Gateway — к списку устройств"
       className={cn(
         'flex min-w-0 items-center gap-3 rounded-lg transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50',
       )}

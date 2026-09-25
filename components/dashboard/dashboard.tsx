@@ -1,76 +1,32 @@
 'use client'
 
-import { useCallback } from 'react'
+import { useCallback, useState } from 'react'
 import useSWR from 'swr'
-import { RefreshCw, Radio, Wifi, WifiOff, Activity } from 'lucide-react'
+import { ArrowUpDown, Check, Radio, RefreshCw, WifiOff } from 'lucide-react'
 import { DashboardShell } from '@/components/dashboard/dashboard-shell'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { DeviceGrid } from './device-grid'
-import { CommandsReference } from './commands-reference'
+import { useCommandPolling } from './use-command-polling'
 import { sortDevices } from '@/lib/device-order'
 import type { Device, Telemetry } from '@/lib/types'
 
 type DeviceWithLatest = Device & { latest: Telemetry | null }
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
+const DEVICES_KEY = '/api/devices'
 
 export function Dashboard() {
+  const { refreshInterval, sendCommand } = useCommandPolling(DEVICES_KEY)
   const { data, error, isLoading, mutate } = useSWR<{ devices: DeviceWithLatest[] }>(
-    '/api/devices',
+    DEVICES_KEY,
     fetcher,
-    { refreshInterval: 3000, keepPreviousData: true },
+    { refreshInterval, keepPreviousData: true },
   )
+  const [isReordering, setIsReordering] = useState(false)
 
-  const rawDevices = data?.devices ?? []
-  const devices = sortDevices(rawDevices)
+  const devices = sortDevices(data?.devices ?? [])
   const online = devices.filter((d) => d.is_online).length
-
-  const deleteDevice = useCallback(
-    async (deviceId: string) => {
-      const res = await fetch(`/api/devices/${encodeURIComponent(deviceId)}`, {
-        method: 'DELETE',
-      })
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}))
-        throw new Error(d.error ?? 'Ошибка при удалении')
-      }
-      await mutate(
-        (current) =>
-          current
-            ? { devices: current.devices.filter((d) => d.device_id !== deviceId) }
-            : current,
-        { revalidate: true },
-      )
-    },
-    [mutate]
-  )
-
-  const renameDevice = useCallback(
-    async (deviceId: string, name: string) => {
-      const res = await fetch(`/api/devices/${deviceId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
-      })
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}))
-        throw new Error(d.error ?? 'Ошибка переименования')
-      }
-      await mutate(
-        (current) =>
-          current
-            ? {
-                devices: current.devices.map((d) =>
-                  d.device_id === deviceId ? { ...d, name } : d,
-                ),
-              }
-            : current,
-        { revalidate: true },
-      )
-    },
-    [mutate],
-  )
 
   const reorderDevices = useCallback(
     async (deviceIds: string[]) => {
@@ -79,22 +35,15 @@ export function Dashboard() {
           if (!current) return current
           const byId = new Map(current.devices.map((d) => [d.device_id, d]))
           const ordered: DeviceWithLatest[] = []
-          for (let index = 0; index < deviceIds.length; index++) {
-            const device = byId.get(deviceIds[index])
+          deviceIds.forEach((id, index) => {
+            const device = byId.get(id)
             if (device) {
-              ordered.push({
-                ...device,
-                metadata: { ...device.metadata, sort_order: index },
-              })
+              ordered.push({ ...device, metadata: { ...device.metadata, sort_order: index } })
             }
-          }
-
+          })
           for (const device of current.devices) {
-            if (!deviceIds.includes(device.device_id)) {
-              ordered.push(device)
-            }
+            if (!deviceIds.includes(device.device_id)) ordered.push(device)
           }
-
           return { devices: ordered }
         },
         { revalidate: false },
@@ -116,69 +65,62 @@ export function Dashboard() {
   )
 
   return (
-    <DashboardShell
-      actions={
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => mutate()}
-          className="text-muted-foreground hover:text-foreground"
-        >
-          <RefreshCw className={`size-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-          <span className="hidden sm:inline">Обновить</span>
-        </Button>
-      }
-    >
+    <DashboardShell>
       <main className="mx-auto max-w-7xl px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-8">
-        <div className="mb-6 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+        <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
           <div>
-            <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Панель</p>
-            <h2 className="mt-1 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
               Устройства
-            </h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Краткий статус на панели · подробности на странице устройства
-            </p>
+            </h1>
+            {devices.length > 0 && (
+              <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
+                <span
+                  aria-hidden
+                  className={
+                    online > 0
+                      ? 'size-2 rounded-full bg-emerald-500'
+                      : 'size-2 rounded-full bg-muted-foreground/40'
+                  }
+                />
+                {online === devices.length
+                  ? `Все ${devices.length} в сети`
+                  : `${online} из ${devices.length} в сети`}
+              </p>
+            )}
           </div>
+
+          {devices.length > 1 && (
+            <Button
+              variant={isReordering ? 'default' : 'outline'}
+              size="sm"
+              className="h-9 px-3"
+              onClick={() => setIsReordering((v) => !v)}
+            >
+              {isReordering ? <Check className="size-3.5" /> : <ArrowUpDown className="size-3.5" />}
+              {isReordering ? 'Готово' : 'Изменить порядок'}
+            </Button>
+          )}
         </div>
 
-        {/* ── Stats row ── */}
-        <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <StatCard
-            icon={<Radio className="size-4" />}
-            label="Всего"
-            value={devices.length}
-            color="default"
-          />
-          <StatCard
-            icon={<Wifi className="size-4" />}
-            label="Онлайн"
-            value={online}
-            color="online"
-          />
-          <StatCard
-            icon={<WifiOff className="size-4" />}
-            label="Оффлайн"
-            value={devices.length - online}
-            color="offline"
-          />
-        </div>
+        {isReordering && (
+          <p className="mb-4 text-sm text-muted-foreground">
+            Стрелками на карточках поменяйте порядок устройств. Он сохраняется сразу.
+          </p>
+        )}
 
-        {/* ── Error ── */}
         {error && (
           <Card className="mb-6 border-destructive/20 bg-destructive/10">
-            <CardContent className="py-3 px-4 text-sm text-destructive flex items-center gap-2">
-              <Activity className="size-4 shrink-0" />
-              Не удалось загрузить устройства. Проверьте подключение к Supabase.
+            <CardContent className="flex items-center gap-2 px-4 py-3 text-sm text-destructive">
+              <WifiOff className="size-4 shrink-0" />
+              Не удалось загрузить устройства. Проверьте подключение к серверу.
             </CardContent>
           </Card>
         )}
 
-        {/* ── Devices grid ── */}
         {isLoading && devices.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 gap-3">
+          <div className="flex flex-col items-center justify-center gap-3 py-20">
             <RefreshCw className="size-5 animate-spin text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">Загрузка списка устройств…</span>
+            <span className="text-sm text-muted-foreground">Загружаем устройства…</span>
           </div>
         ) : devices.length === 0 ? (
           <Card className="border-dashed bg-card/50 shadow-none">
@@ -187,69 +129,21 @@ export function Dashboard() {
                 <Radio className="size-5 text-muted-foreground" />
               </div>
               <h3 className="font-semibold text-foreground">Устройств пока нет</h3>
-              <p className="max-w-sm text-sm text-muted-foreground text-balance">
-                Как только ESP32 отправит сообщение в MQTT, Node-RED создаст запись,
-                и устройство появится здесь.
+              <p className="max-w-sm text-balance text-sm text-muted-foreground">
+                Включите ESP32 — как только оно подключится к сети, устройство
+                появится здесь автоматически.
               </p>
             </CardContent>
           </Card>
         ) : (
           <DeviceGrid
             devices={devices}
-            onDelete={deleteDevice}
-            onRename={renameDevice}
+            onCommand={sendCommand}
             onReorder={reorderDevices}
+            isReordering={isReordering}
           />
         )}
-
-        {/* ── Commands reference ── */}
-        <div className="mt-8">
-          <CommandsReference />
-        </div>
       </main>
     </DashboardShell>
-  )
-}
-
-/* ── Stat Card ── */
-function StatCard({
-  icon,
-  label,
-  value,
-  color,
-}: {
-  icon: React.ReactNode
-  label: string
-  value: number
-  color: 'default' | 'online' | 'offline'
-}) {
-  const colorStyles = {
-    default: 'text-muted-foreground',
-    online: 'text-emerald-600 dark:text-emerald-400',
-    offline: 'text-muted-foreground/60',
-  }
-
-  const iconBgStyles = {
-    default: 'bg-muted text-muted-foreground',
-    online: 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-400/10 dark:text-emerald-400',
-    offline: 'bg-muted text-muted-foreground/60',
-  }
-
-  return (
-    <Card className="overflow-hidden">
-      <CardContent className="flex items-center gap-3 p-4 sm:p-5">
-        <div className={`flex size-10 shrink-0 items-center justify-center rounded-2xl ${iconBgStyles[color]}`}>
-          {icon}
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-            {label}
-          </p>
-          <p className={`text-3xl font-semibold tracking-tight tabular-nums ${colorStyles[color]}`}>
-            {value}
-          </p>
-        </div>
-      </CardContent>
-    </Card>
   )
 }

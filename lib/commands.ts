@@ -26,8 +26,11 @@ import {
   Fan,
   Bell,
   Circle,
+  Sun,
+  Thermometer,
   type LucideIcon,
 } from "lucide-react";
+import type { CommandDef } from "@/lib/types";
 
 const FALLBACK_ICON = Zap;
 
@@ -43,12 +46,72 @@ const ICON_MAP: Record<string, LucideIcon> = {
   bell: Bell,
   circle: Circle,
   dot: Circle,
+  sun: Sun,
+  thermometer: Thermometer,
 };
 
 /** Получить компонент иконки по строковому идентификатору из скетча */
 export function getCommandIcon(icon?: string): LucideIcon {
   if (!icon) return FALLBACK_ICON;
   return ICON_MAP[icon] ?? FALLBACK_ICON;
+}
+
+/**
+ * Опасные команды (перезагрузка, сброс, прошивка) не показываем среди
+ * обычного управления — только в «Обслуживании» и с подтверждением.
+ */
+export function isDangerousCommand(cmd: CommandDef): boolean {
+  return /reboot|restart|reset|format|erase|ota/i.test(cmd.action);
+}
+
+function parseBool(raw: unknown): boolean | undefined {
+  if (typeof raw === "boolean") return raw;
+  if (typeof raw === "number") return raw !== 0;
+  if (typeof raw === "string") {
+    const l = raw.toLowerCase().trim();
+    if (l === "true" || l === "1" || l === "on") return true;
+    if (l === "false" || l === "0" || l === "off") return false;
+  }
+  return undefined;
+}
+
+/**
+ * Текущее состояние toggle-команды из телеметрии: сначала ключ, равный action,
+ * затем похожий (led ↔ board_led и т.п.).
+ */
+export function getToggleState(
+  payload: Record<string, unknown> | undefined,
+  action: string,
+): boolean | undefined {
+  if (!payload) return undefined;
+  const direct = parseBool(payload[action]);
+  if (direct !== undefined) return direct;
+
+  const act = action.toLowerCase();
+  for (const [key, val] of Object.entries(payload)) {
+    const k = key.toLowerCase();
+    if (k === act || k.endsWith(`_${act}`) || act.endsWith(`_${k}`)) {
+      const parsed = parseBool(val);
+      if (parsed !== undefined) return parsed;
+    }
+  }
+  return undefined;
+}
+
+/** Текущее значение range-команды из телеметрии */
+export function getRangeState(
+  payload: Record<string, unknown> | undefined,
+  action: string,
+): number | undefined {
+  const raw = Number(payload?.[action]);
+  return Number.isFinite(raw) ? raw : undefined;
+}
+
+export function getRangeBounds(cmd: CommandDef) {
+  const min = Number.isFinite(cmd.min) ? (cmd.min as number) : 0;
+  const max = Number.isFinite(cmd.max) ? (cmd.max as number) : 100;
+  const step = Number(cmd.step) > 0 ? (cmd.step as number) : 1;
+  return { min, max, step };
 }
 
 /** Справочник поддерживаемых команд (прошивка esp32-example.ino и совместимые) */

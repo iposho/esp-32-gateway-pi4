@@ -65,9 +65,15 @@ export type DeviceMetadata = Record<string, unknown> & {
 export type CommandDef = {
   action: string;
   title: string;
-  type: "toggle" | "trigger";
+  /** toggle — вкл/выкл, trigger — разовое действие, range — значение min…max */
+  type: "toggle" | "trigger" | "range";
   icon?: string;
   description?: string;
+  /** Для range: границы, шаг и единица (по умолчанию 0…100, шаг 1) */
+  min?: number;
+  max?: number;
+  step?: number;
+  unit?: string;
 };
 
 export type Telemetry = {

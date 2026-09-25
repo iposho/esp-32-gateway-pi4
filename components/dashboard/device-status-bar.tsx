@@ -1,93 +1,92 @@
 "use client";
 
-import { RefreshCw, WifiOff } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { RefreshCw } from "lucide-react";
 import { timeAgo } from "@/lib/format";
 import { getOtaStatus } from "@/lib/ota";
 import { cn } from "@/lib/utils";
 
+/**
+ * Статус устройства человеческим языком:
+ * «В сети · только что» / «Нет связи · 3 ч назад» + прогресс обновления прошивки.
+ */
 export function DeviceStatusBar({
   online,
   lastSeen,
   payload,
-  compact = false,
+  className,
 }: {
   online: boolean;
   lastSeen: string | null;
   payload: Record<string, unknown>;
-  compact?: boolean;
+  className?: string;
 }) {
-  const { otaStatus, otaProgress, isOtaActive, otaLabel } =
-    getOtaStatus(payload);
+  const { otaStatus, otaProgress, isOtaActive } = getOtaStatus(payload);
+  const otaText =
+    otaStatus === "failed"
+      ? "Обновление не удалось"
+      : otaStatus === "success"
+        ? "Прошивка обновлена"
+        : isOtaActive
+          ? `Обновляется прошивка · ${Math.round(otaProgress)}%`
+          : null;
 
   return (
-    <div
-      className={cn(
-        "flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 px-3 py-2",
-        !compact && "border-b border-border/60",
-      )}
-    >
-      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-        <Badge
-          variant={online ? "online" : "outline"}
+    <div className={cn("min-w-0", className)}>
+      <p className="flex min-w-0 items-center gap-1.5 text-sm">
+        <span
+          aria-hidden
           className={cn(
-            "h-6 px-2 text-[11px]",
-            !online && "border-border text-muted-foreground",
+            "size-2 shrink-0 rounded-full",
+            online ? "bg-emerald-500" : "bg-muted-foreground/40",
+          )}
+        />
+        <span
+          className={cn(
+            "font-medium",
+            online
+              ? "text-emerald-600 dark:text-emerald-400"
+              : "text-muted-foreground",
           )}
         >
-          {online ? (
-            <>
-              <span className="relative flex size-1.5">
-                <span className="absolute inline-flex size-full motion-safe:animate-ping rounded-full bg-current opacity-40 motion-reduce:animate-none" />
-                <span className="relative inline-flex size-1.5 rounded-full bg-current" />
-              </span>
-              Онлайн
-            </>
-          ) : (
-            <>
-              <WifiOff className="size-3" aria-hidden />
-              Оффлайн
-            </>
-          )}
-        </Badge>
-        {otaLabel && (
-          <Badge
-            variant="outline"
+          {online ? "В сети" : "Нет связи"}
+        </span>
+        <span className="truncate text-muted-foreground">
+          · {online ? `обновлено ${timeAgo(lastSeen)}` : timeAgo(lastSeen)}
+        </span>
+      </p>
+
+      {otaText && (
+        <div className="mt-2">
+          <p
             className={cn(
-              "h-6 px-2 text-[11px]",
-              otaStatus === "failed"
-                ? "border-destructive/25 bg-destructive/10 text-destructive"
-                : "border-primary/25 bg-primary/10 text-primary",
+              "flex items-center gap-1.5 text-xs font-medium",
+              otaStatus === "failed" ? "text-destructive" : "text-primary",
             )}
           >
             <RefreshCw
+              aria-hidden
               className={cn(
                 "size-3",
-                isOtaActive && "motion-safe:animate-spin motion-reduce:animate-none",
+                isOtaActive && "motion-safe:animate-spin",
               )}
-              aria-hidden
             />
-            {otaLabel}
-            {isOtaActive ? ` ${Math.round(otaProgress)}%` : ""}
-          </Badge>
-        )}
-      </div>
-      <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
-        {timeAgo(lastSeen)}
-      </span>
-      {otaStatus && (
-        <div className="w-full pt-1.5" role="progressbar" aria-valuenow={otaProgress} aria-valuemin={0} aria-valuemax={100} aria-label="Прогресс OTA">
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-border/80">
+            {otaText}
+          </p>
+          {isOtaActive && (
             <div
-              className={cn(
-                "h-full motion-safe:transition-[width] motion-safe:duration-500 motion-safe:ease-out motion-reduce:transition-none",
-                otaStatus === "failed" ? "bg-destructive" : "bg-primary",
-              )}
-              style={{
-                width: `${Math.max(0, Math.min(100, otaProgress))}%`,
-              }}
-            />
-          </div>
+              className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-border/80"
+              role="progressbar"
+              aria-valuenow={otaProgress}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label="Прогресс обновления прошивки"
+            >
+              <div
+                className="h-full bg-primary motion-safe:transition-[width] motion-safe:duration-500"
+                style={{ width: `${Math.max(0, Math.min(100, otaProgress))}%` }}
+              />
+            </div>
+          )}
         </div>
       )}
     </div>

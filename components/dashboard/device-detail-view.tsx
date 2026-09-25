@@ -1,75 +1,57 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  Send,
-  Trash2,
-  Pencil,
+  ArrowLeft,
   Camera,
   CameraOff,
-  RefreshCw,
-  Zap,
-  Terminal,
-  Upload,
+  ChevronDown,
   Cpu,
   FolderOpen,
-  ArrowLeft,
-  Activity,
-  ChevronDown,
-  CheckCircle2,
+  Loader2,
+  Pencil,
+  RefreshCw,
+  Send,
+  Trash2,
+  Upload,
+  WifiOff,
+  Wrench,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DeviceStatusBar } from "./device-status-bar";
-import { MetricsGrid } from "./metrics-grid";
 import {
-  getDetailMetricGroups,
-  hasCameraMetrics,
-} from "@/lib/metrics";
-import { getCommandIcon } from "@/lib/commands";
-import type { CommandDef, Device, Telemetry } from "@/lib/types";
-import { toast } from "sonner";
+  DeviceControls,
+  getUserCommands,
+  type SendCommand,
+} from "./device-controls";
+import { CommandsReference } from "./commands-reference";
 import { PinManagerModal } from "./pin-manager-modal";
 import { FileManagerModal } from "./file-manager-modal";
-
+import {
+  getDetailMetricGroups,
+  getDeviceIp,
+  getFirmwareInfo,
+  hasCameraMetrics,
+} from "@/lib/metrics";
+import { getCommandIcon, isDangerousCommand } from "@/lib/commands";
 import { getOtaStatus, uploadDeviceFirmware } from "@/lib/ota";
+import type { CommandDef, Device, Telemetry } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 type DeviceWithLatest = Device & { latest: Telemetry | null };
 
-function getPayloadToggleValue(
-  payload: Record<string, unknown> | undefined,
-  action: string,
-): boolean | undefined {
-  if (!payload) return undefined;
-
-  const raw = payload[action];
-  if (typeof raw === "boolean") return raw;
-  if (typeof raw === "number") return raw !== 0;
-  if (typeof raw === "string") {
-    const l = raw.toLowerCase().trim();
-    if (l === "true" || l === "1" || l === "on") return true;
-    if (l === "false" || l === "0" || l === "off") return false;
-  }
-
-  for (const [key, val] of Object.entries(payload)) {
-    const k = key.toLowerCase();
-    const act = action.toLowerCase();
-    if (k === act || k.endsWith(`_${act}`) || act.endsWith(`_${k}`)) {
-      if (typeof val === "boolean") return val;
-      if (typeof val === "number") return val !== 0;
-      if (typeof val === "string") {
-        const l = val.toLowerCase().trim();
-        if (l === "true" || l === "1" || l === "on") return true;
-        if (l === "false" || l === "0" || l === "off") return false;
-      }
-    }
-  }
-
-  return undefined;
-}
+/** Эти показания уже видны в «Обслуживании» — в основном списке не дублируем */
+const SERVICE_INFO_KEYS = new Set([
+  "ip",
+  "fw_version",
+  "fw_date",
+  "firmware_version",
+  "firmware_date",
+]);
 
 export function DeviceDetailView({
   device,
@@ -78,200 +60,435 @@ export function DeviceDetailView({
   onRename,
 }: {
   device: DeviceWithLatest;
-  onCommand: (
-    deviceId: string,
-    payload: Record<string, unknown>,
-  ) => Promise<void>;
+  onCommand: SendCommand;
   onDelete?: (deviceId: string) => Promise<void>;
   onRename?: (deviceId: string, name: string) => Promise<void>;
 }) {
-  const [custom, setCustom] = useState('{ "action": "led", "value": true }');
-  const [sending, setSending] = useState<string | null>(null);
-  const [isEditingName, setIsEditingName] = useState(false);
-  const [draftName, setDraftName] = useState(device.name);
-  const [isSavingName, setIsSavingName] = useState(false);
-  const [toggles, setToggles] = useState<Record<string, boolean>>({});
-  const [collapsedGroups, setCollapsedGroups] = useState<
-    Record<string, boolean>
-  >({});
-  const [ackedCommands, setAckedCommands] = useState<Record<string, boolean>>(
-    {},
+  const online = device.is_online;
+  const payload = device.latest?.payload ?? {};
+  const userCommands = getUserCommands(device);
+  const controlledKeys = new Set(
+    userCommands
+      .filter((c) => c.type === "toggle" || c.type === "range")
+      .map((c) => c.action),
   );
-  const [isDeleting, setIsDeleting] = useState(false);
+  const metricGroups = getDetailMetricGroups(device.metadata, payload)
+    .map(({ group, metrics }) => ({
+      group,
+      metrics: metrics.filter(
+        (m) =>
+          !controlledKeys.has(m.def.key) && !SERVICE_INFO_KEYS.has(m.def.key),
+      ),
+    }))
+    .filter((g) => g.metrics.length > 0);
+
+  return (
+    <>
+      <Link
+        href="/dashboard"
+        className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <ArrowLeft className="size-4" aria-hidden />
+        Все устройства
+      </Link>
+
+      <DeviceHeader device={device} onRename={onRename} />
+
+      {!online && (
+        <div className="mb-6 flex items-start gap-3 rounded-2xl border border-border bg-muted/40 px-4 py-3 text-sm">
+          <WifiOff
+            className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+            aria-hidden
+          />
+          <p className="text-muted-foreground">
+            Устройство сейчас не на связи, поэтому управление недоступно.
+            Проверьте питание и Wi-Fi — как только оно подключится, всё
+            заработает автоматически.
+          </p>
+        </div>
+      )}
+
+      <div className="space-y-6">
+        {userCommands.length > 0 && (
+          <Section title="Управление">
+            <DeviceControls device={device} onCommand={onCommand} />
+          </Section>
+        )}
+
+        {hasCameraMetrics(payload) && (
+          <CameraSection
+            device={device}
+            online={online}
+            payload={payload}
+            onCommand={onCommand}
+          />
+        )}
+
+        {metricGroups.length > 0 && (
+          <Section title="Показания">
+            <div className="space-y-5">
+              {metricGroups.map(({ group, metrics }) => (
+                <div key={group}>
+                  {metricGroups.length > 1 && (
+                    <h3 className="mb-2 text-xs font-medium text-muted-foreground">
+                      {group}
+                    </h3>
+                  )}
+                  <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {metrics.map((metric) => {
+                      const Icon = metric.icon;
+                      return (
+                        <div
+                          key={metric.def.key}
+                          className="min-w-0 rounded-xl bg-muted/40 px-3 py-2.5"
+                        >
+                          <dt className="flex items-center gap-1 truncate text-xs text-muted-foreground">
+                            <Icon className="size-3 shrink-0" aria-hidden />
+                            {metric.label}
+                          </dt>
+                          <dd
+                            className="mt-0.5 truncate text-base font-semibold tabular-nums"
+                            title={metric.formatted}
+                          >
+                            {metric.formatted}
+                          </dd>
+                        </div>
+                      );
+                    })}
+                  </dl>
+                </div>
+              ))}
+            </div>
+          </Section>
+        )}
+
+        <MaintenanceSection
+          device={device}
+          online={online}
+          payload={payload}
+          onCommand={onCommand}
+          onDelete={onDelete}
+        />
+      </div>
+    </>
+  );
+}
+
+function Section({
+  title,
+  children,
+  action,
+}: {
+  title: string;
+  children: React.ReactNode;
+  action?: React.ReactNode;
+}) {
+  return (
+    <Card className="bg-card/75 p-4 sm:p-5">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h2 className="text-base font-semibold tracking-tight">{title}</h2>
+        {action}
+      </div>
+      {children}
+    </Card>
+  );
+}
+
+/* ── Заголовок: название (с переименованием) и статус ── */
+
+function DeviceHeader({
+  device,
+  onRename,
+}: {
+  device: DeviceWithLatest;
+  onRename?: (deviceId: string, name: string) => Promise<void>;
+}) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState(device.name);
+  const [isSaving, setIsSaving] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!isEditing) setDraft(device.name);
+  }, [device.name, isEditing]);
+
+  useEffect(() => {
+    if (isEditing) inputRef.current?.select();
+  }, [isEditing]);
+
+  async function save() {
+    const trimmed = draft.trim();
+    if (!trimmed || trimmed === device.name || !onRename) {
+      if (!trimmed) toast.error("Название не может быть пустым");
+      setDraft(device.name);
+      setIsEditing(false);
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await onRename(device.device_id, trimmed);
+      toast.success("Название сохранено");
+      setIsEditing(false);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Ошибка переименования");
+      setDraft(device.name);
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <div className="mb-6">
+      {isEditing ? (
+        <Input
+          ref={inputRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void save();
+            if (e.key === "Escape") {
+              setDraft(device.name);
+              setIsEditing(false);
+            }
+          }}
+          onBlur={() => void save()}
+          disabled={isSaving}
+          className="h-10 max-w-md rounded-lg px-2 text-2xl font-semibold"
+          maxLength={100}
+          aria-label="Название устройства"
+        />
+      ) : (
+        <div className="flex min-w-0 items-center gap-1">
+          <h1 className="truncate text-2xl font-semibold tracking-tight sm:text-3xl">
+            {device.name}
+          </h1>
+          {onRename && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="shrink-0 text-muted-foreground hover:text-foreground"
+              onClick={() => setIsEditing(true)}
+              aria-label="Переименовать"
+              title="Переименовать"
+            >
+              <Pencil className="size-3.5" />
+            </Button>
+          )}
+        </div>
+      )}
+      <DeviceStatusBar
+        className="mt-1.5"
+        online={device.is_online}
+        lastSeen={device.last_seen}
+        payload={device.latest?.payload ?? {}}
+      />
+    </div>
+  );
+}
+
+/* ── Камера ── */
+
+function CameraSection({
+  device,
+  online,
+  payload,
+  onCommand,
+}: {
+  device: DeviceWithLatest;
+  online: boolean;
+  payload: Record<string, unknown>;
+  onCommand: SendCommand;
+}) {
   const [imgTimestamp, setImgTimestamp] = useState(Date.now());
   const [imgLoading, setImgLoading] = useState(false);
   const [imgError, setImgError] = useState(false);
-  const imgRetryRef = useRef(0);
-  const [isUploading, setIsUploading] = useState(false);
-  const [isPinModalOpen, setIsPinModalOpen] = useState(false);
-  const [isFileModalOpen, setIsFileModalOpen] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const nameInputRef = useRef<HTMLInputElement>(null);
-
-  const online = device.is_online;
-  const payload = device.latest?.payload ?? {};
-  const metricGroups = getDetailMetricGroups(device.metadata, payload);
-  const isCamera = hasCameraMetrics(payload);
-  const sketchCommands =
-    (device.metadata?.commands as CommandDef[] | undefined) ?? [];
-
-  useEffect(() => {
-    if (!payload) return;
-    setToggles((prev) => {
-      let changed = false;
-      const next = { ...prev };
-      for (const cmd of sketchCommands) {
-        if (cmd.type === "toggle") {
-          const teleVal = getPayloadToggleValue(payload, cmd.action);
-          if (teleVal !== undefined) {
-            if (prev[cmd.action] !== teleVal) {
-              next[cmd.action] = teleVal;
-              changed = true;
-            }
-            setAckedCommands((ackPrev) =>
-              ackPrev[cmd.action]
-                ? ackPrev
-                : { ...ackPrev, [cmd.action]: true },
-            );
-          }
-        }
-      }
-      return changed ? next : prev;
-    });
-  }, [payload, sketchCommands]);
-
-  const { otaStatus, otaProgress, isOtaActive, otaLabel } =
-    getOtaStatus(payload);
-  const cameraReady = payload.camera_ready === true;
-  const cameraStatusLabel =
-    payload.camera_ready === true
-      ? "Камера готова"
-      : payload.camera_ready === false
-        ? "Камера не готова"
-        : "Есть снимок";
-  const hasCameraSignal = cameraReady || Boolean(payload.last_photo_url);
+  const [isCapturing, setIsCapturing] = useState(false);
+  const retryRef = useRef(0);
+  const hasPhoto = Boolean(payload.last_photo_url);
 
   useEffect(() => {
     if (payload.capture_count) {
       setImgTimestamp(Date.now());
       setImgError(false);
-      imgRetryRef.current = 0;
+      retryRef.current = 0;
     }
   }, [payload.capture_count]);
-
-  useEffect(() => {
-    if (!isEditingName) setDraftName(device.name);
-  }, [device.name, isEditingName]);
-
-  useEffect(() => {
-    if (isEditingName) nameInputRef.current?.select();
-  }, [isEditingName]);
-
-  async function saveName() {
-    const trimmed = draftName.trim();
-    if (!trimmed) {
-      toast.error("Название не может быть пустым");
-      setDraftName(device.name);
-      setIsEditingName(false);
-      return;
-    }
-    if (trimmed === device.name) {
-      setIsEditingName(false);
-      return;
-    }
-    if (!onRename) {
-      setIsEditingName(false);
-      return;
-    }
-
-    setIsSavingName(true);
-    try {
-      await onRename(device.device_id, trimmed);
-      toast.success("Название обновлено");
-      setIsEditingName(false);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Ошибка переименования");
-      setDraftName(device.name);
-    } finally {
-      setIsSavingName(false);
-    }
-  }
-
-  function cancelEditName() {
-    setDraftName(device.name);
-    setIsEditingName(false);
-  }
-
-  function startEditName() {
-    if (!onRename || isSavingName) return;
-    setDraftName(device.name);
-    setIsEditingName(true);
-  }
-
-  async function send(
-    payload: Record<string, unknown>,
-    key: string,
-    revertVal?: boolean,
-  ) {
-    setSending(key);
-    setAckedCommands((prev) => ({ ...prev, [key]: false }));
-    try {
-      await onCommand(device.device_id, payload);
-      toast.success("Команда отправлена");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Ошибка отправки");
-      if (revertVal !== undefined) {
-        setToggles((prev) => ({ ...prev, [key]: revertVal }));
-      }
-    } finally {
-      setSending(null);
-    }
-  }
-
-  function sendCustom() {
-    try {
-      const parsed = JSON.parse(custom);
-      void send(parsed, "custom");
-    } catch {
-      toast.error("Невалидный JSON");
-    }
-  }
-
-  function handleSketchCommand(cmd: CommandDef) {
-    if (cmd.type === "toggle") {
-      const currentVal =
-        toggles[cmd.action] ??
-        getPayloadToggleValue(payload, cmd.action) ??
-        false;
-      const next = !currentVal;
-      setToggles((prev) => ({ ...prev, [cmd.action]: next }));
-      void send({ action: cmd.action, value: next }, cmd.action, currentVal);
-    } else {
-      if (
-        cmd.action === "reboot" &&
-        !window.confirm(`Перезагрузить ${device.device_id}?`)
-      )
-        return;
-      void send({ action: cmd.action }, cmd.action);
-    }
-  }
 
   function refreshPhoto() {
     setImgLoading(true);
     setImgError(false);
-    imgRetryRef.current = 0;
+    retryRef.current = 0;
     setImgTimestamp(Date.now());
+  }
+
+  async function capture() {
+    setIsCapturing(true);
+    try {
+      await onCommand(device.device_id, { action: "capture" });
+      toast.success("Снимок запрошен — он появится через пару секунд");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Не удалось сделать снимок");
+    } finally {
+      setIsCapturing(false);
+    }
+  }
+
+  return (
+    <Section
+      title="Камера"
+      action={
+        hasPhoto ? (
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            onClick={refreshPhoto}
+            aria-label="Перезагрузить картинку"
+            title="Перезагрузить картинку"
+          >
+            <RefreshCw
+              className={cn("size-3.5", imgLoading && "animate-spin")}
+            />
+          </Button>
+        ) : undefined
+      }
+    >
+      <div className="overflow-hidden rounded-xl bg-muted/40">
+        {hasPhoto && !imgError ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={`/api/devices/${encodeURIComponent(device.device_id)}/camera?t=${imgTimestamp}`}
+            alt={`Снимок камеры «${device.name}»`}
+            className={cn(
+              "aspect-video w-full object-contain transition-opacity duration-300",
+              imgLoading ? "opacity-50" : "opacity-100",
+            )}
+            onLoad={() => {
+              setImgLoading(false);
+              setImgError(false);
+              retryRef.current = 0;
+            }}
+            onError={() => {
+              setImgLoading(false);
+              setImgError(true);
+              // Повторяем до 2 раз с растущей паузой
+              if (retryRef.current < 2) {
+                retryRef.current++;
+                setTimeout(refreshPhoto, 2000 * 2 ** (retryRef.current - 1));
+              }
+            }}
+          />
+        ) : (
+          <div className="flex aspect-video flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
+            <CameraOff className="size-8 opacity-40" aria-hidden />
+            {online ? "Снимка пока нет" : "Камера не на связи"}
+          </div>
+        )}
+      </div>
+      <Button
+        className="mt-3 h-10 w-full"
+        disabled={!online || isCapturing}
+        onClick={() => void capture()}
+      >
+        {isCapturing ? (
+          <Loader2 className="size-4 animate-spin" />
+        ) : (
+          <Camera className="size-4" />
+        )}
+        Сделать снимок
+      </Button>
+    </Section>
+  );
+}
+
+/* ── Обслуживание: всё техническое, свёрнуто по умолчанию ── */
+
+function MaintenanceSection({
+  device,
+  online,
+  payload,
+  onCommand,
+  onDelete,
+}: {
+  device: DeviceWithLatest;
+  online: boolean;
+  payload: Record<string, unknown>;
+  onCommand: SendCommand;
+  onDelete?: (deviceId: string) => Promise<void>;
+}) {
+  const [isUploading, setIsUploading] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [isPinModalOpen, setIsPinModalOpen] = useState(false);
+  const [isFileModalOpen, setIsFileModalOpen] = useState(false);
+  const [custom, setCustom] = useState('{ "action": "led", "value": true }');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const ip = getDeviceIp(payload);
+  const firmware = getFirmwareInfo(payload);
+  const { isOtaActive } = getOtaStatus(payload);
+  const dangerousCommands = (device.metadata?.commands ?? []).filter(
+    isDangerousCommand,
+  );
+
+  async function run(key: string, body: Record<string, unknown>, done: string) {
+    setBusyAction(key);
+    try {
+      await onCommand(device.device_id, body);
+      toast.success(done);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Не удалось отправить команду");
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  function runDangerous(cmd: CommandDef) {
+    if (!window.confirm(`${cmd.title}: «${device.name}»?`)) return;
+    void run(cmd.action, { action: cmd.action }, `${cmd.title}: команда отправлена`);
+  }
+
+  function sendCustom() {
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(custom);
+    } catch {
+      toast.error("Это не похоже на JSON — проверьте кавычки и скобки");
+      return;
+    }
+    void run("custom", parsed, "Команда отправлена");
+  }
+
+  async function handleFirmware(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (
+      !window.confirm(
+        `Установить прошивку «${file.name}» на «${device.name}»? Устройство перезагрузится.`,
+      )
+    )
+      return;
+
+    setIsUploading(true);
+    try {
+      await uploadDeviceFirmware(device.device_id, file);
+      toast.success("Прошивка отправлена — прогресс виден под названием устройства");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Ошибка обновления прошивки");
+    } finally {
+      setIsUploading(false);
+    }
   }
 
   async function handleDelete() {
     if (!onDelete) return;
     if (
       !window.confirm(
-        `Вы уверены, что хотите удалить устройство ${device.name || device.device_id}?`,
+        `Удалить «${device.name}» из списка вместе с историей показаний?\n\nЕсли устройство снова подключится к сети, оно появится заново.`,
       )
     )
       return;
-
     setIsDeleting(true);
     try {
       await onDelete(device.device_id);
@@ -282,419 +499,177 @@ export function DeviceDetailView({
     }
   }
 
-  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setIsUploading(true);
-    try {
-      await uploadDeviceFirmware(device.device_id, file);
-      toast.success("Прошивка отправлена на устройство");
-    } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "Ошибка OTA обновления",
-      );
-    } finally {
-      setIsUploading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
-    }
-  }
-
   return (
-    <>
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex min-w-0 items-start gap-2 sm:gap-3">
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            render={<Link href="/dashboard" aria-label="Назад к списку" />}
-            nativeButton={false}
-            className="mt-0.5 shrink-0 text-muted-foreground"
-          >
-            <ArrowLeft className="size-4" />
-          </Button>
-          <div className="min-w-0">
-            {isEditingName ? (
-              <Input
-                ref={nameInputRef}
-                value={draftName}
-                onChange={(e) => setDraftName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void saveName();
-                  if (e.key === "Escape") cancelEditName();
-                }}
-                onBlur={() => void saveName()}
-                disabled={isSavingName}
-                className="h-9 max-w-md rounded-lg px-2 text-xl font-semibold"
-                maxLength={100}
-              />
-            ) : (
-              <div className="group/name flex min-w-0 items-center gap-1">
-                <h1 className="truncate text-xl font-semibold tracking-tight sm:text-3xl">
-                  {device.name}
-                </h1>
-                {onRename && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    className="size-7 shrink-0 text-muted-foreground/50 hover:text-foreground"
-                    onClick={startEditName}
-                    title="Переименовать"
-                  >
-                    <Pencil className="size-3.5" />
-                  </Button>
-                )}
-              </div>
-            )}
-            <p className="mt-1 break-all font-mono text-xs text-muted-foreground sm:text-sm">
+    <Card className="bg-card/75 p-0">
+      <details className="group">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-4 sm:px-5 [&::-webkit-details-marker]:hidden">
+          <span className="flex items-center gap-2">
+            <Wrench className="size-4 text-muted-foreground" aria-hidden />
+            <span className="text-base font-semibold tracking-tight">
+              Обслуживание
+            </span>
+            <span className="hidden text-sm text-muted-foreground sm:inline">
+              · прошивка, перезагрузка, удаление
+            </span>
+          </span>
+          <ChevronDown
+            className="size-4 text-muted-foreground transition-transform group-open:rotate-180"
+            aria-hidden
+          />
+        </summary>
+
+        <div className="space-y-6 border-t border-border/60 px-4 py-4 sm:px-5">
+          <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-[auto_1fr]">
+            <dt className="text-muted-foreground">ID устройства</dt>
+            <dd className="break-all font-mono text-xs sm:text-sm">
               {device.device_id}
-            </p>
-          </div>
-        </div>
-
-        {onDelete && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full shrink-0 border-destructive/30 text-destructive hover:bg-destructive/10 sm:w-auto"
-            onClick={handleDelete}
-            disabled={isDeleting}
-          >
-            <Trash2 className="size-3.5" />
-            Удалить
-          </Button>
-        )}
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-[1fr_380px] xl:grid-cols-[1fr_420px]">
-        {/* ── Левая колонка: метрики и камера ── */}
-        <div className="space-y-6">
-          <Card className="overflow-hidden bg-card/75">
-            <div
-              className={`h-0.5 w-full ${
-                online
-                  ? "bg-gradient-to-r from-emerald-500 via-primary to-emerald-400"
-                  : "bg-muted"
-              }`}
-            />
-            <div className="p-4 sm:p-5">
-              <div className="mb-4 flex items-center gap-3">
-                <div
-                  className={`flex size-10 shrink-0 items-center justify-center rounded-xl ${
-                    online
-                      ? "bg-emerald-500/10 text-emerald-600 dark:bg-emerald-400/10 dark:text-emerald-400"
-                      : "bg-muted text-muted-foreground"
-                  }`}
-                >
-                  <Activity className="size-4" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                    Статус
-                  </p>
-                  <DeviceStatusBar
-                    online={online}
-                    lastSeen={device.last_seen}
-                    payload={payload}
-                    compact
-                  />
-                </div>
-              </div>
-
-              {metricGroups.map(({ group, metrics }) => {
-                const isCollapsed = collapsedGroups[group] ?? false;
-                return (
-                  <section key={group} className="mt-6 first:mt-0">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setCollapsedGroups((prev) => ({
-                          ...prev,
-                          [group]: !isCollapsed,
-                        }))
-                      }
-                      className="mb-3 flex w-full items-center justify-between text-left text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-foreground"
-                    >
-                      <span className="flex items-center gap-1.5">
-                        {group}
-                        <span className="rounded-full bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-                          {metrics.length}
-                        </span>
-                      </span>
-                      <ChevronDown
-                        className={`size-3.5 transition-transform duration-200 ${isCollapsed ? "-rotate-90" : ""}`}
-                      />
-                    </button>
-                    {!isCollapsed && <MetricsGrid metrics={metrics} variant="detail" />}
-                  </section>
-                );
-              })}
-            </div>
-          </Card>
-
-          {isCamera && (
-            <Card className="overflow-hidden bg-card/75">
-              <div className="border-b border-border/60 px-4 py-3 sm:px-5">
-                <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                  <Camera className="size-3" />
-                  Камера
-                </h2>
-              </div>
-              <div className="relative">
-                <Badge
-                  variant="outline"
-                  className={`absolute left-4 top-4 z-10 h-6 border px-2 text-[10px] shadow-sm backdrop-blur-sm ${
-                    hasCameraSignal
-                      ? "border-primary/30 bg-primary/20 text-primary"
-                      : "border-border/80 bg-background/75 text-muted-foreground"
-                  }`}
-                >
-                  {hasCameraSignal ? (
-                    <Camera className="size-2.5" />
-                  ) : (
-                    <CameraOff className="size-2.5" />
-                  )}
-                  {cameraStatusLabel}
-                </Badge>
-                {!online && !payload.last_photo_url ? (
-                  <div className="flex aspect-video flex-col items-center justify-center gap-2 bg-muted/40 text-muted-foreground/60">
-                    <CameraOff className="size-10 opacity-40" />
-                    <span className="text-sm">Камера офлайн</span>
-                  </div>
-                ) : payload.last_photo_url && !imgError ? (
-                  <div className="flex aspect-video items-center justify-center bg-black/5 dark:bg-black/20">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={`/api/devices/${device.device_id}/camera?t=${imgTimestamp}`}
-                      alt="Camera snapshot"
-                      className={`h-full w-full object-contain transition-opacity duration-300 ${imgLoading ? "opacity-50" : "opacity-100"}`}
-                      onLoad={() => {
-                        setImgLoading(false);
-                        setImgError(false);
-                        imgRetryRef.current = 0;
-                      }}
-                      onError={() => {
-                        setImgLoading(false);
-                        setImgError(true);
-                        // Auto-retry up to 2 times with exponential backoff
-                        if (imgRetryRef.current < 2) {
-                          imgRetryRef.current++;
-                          const delay = 2000 * Math.pow(2, imgRetryRef.current - 1);
-                          setTimeout(() => refreshPhoto(), delay);
-                        }
-                      }}
-                    />
-                  </div>
-                ) : (
-                  <div className="flex aspect-video items-center justify-center text-sm text-muted-foreground">
-                    Нет снимка
-                  </div>
-                )}
-              </div>
-              {online && (
-                <div className="flex items-center gap-2 border-t border-border bg-background/45 p-3 sm:p-4">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-9 flex-1"
-                    disabled={!online || sending !== null}
-                    onClick={() => send({ action: "capture" }, "capture")}
-                  >
-                    <Camera className="size-3.5" />
-                    {sending === "capture" ? "Делаем..." : "Снимок"}
-                  </Button>
-                  <Button
-                    size="icon-sm"
-                    variant="outline"
-                    className="shrink-0"
-                    onClick={refreshPhoto}
-                    title="Обновить картинку"
-                  >
-                    <RefreshCw
-                      className={`size-3.5 ${imgLoading ? "animate-spin" : ""}`}
-                    />
-                  </Button>
-                </div>
+            </dd>
+            <dt className="text-muted-foreground">IP-адрес</dt>
+            <dd className="font-mono text-xs sm:text-sm">{ip ?? "—"}</dd>
+            <dt className="text-muted-foreground">Прошивка</dt>
+            <dd>
+              {firmware.version ? `v${firmware.version}` : "—"}
+              {firmware.date && (
+                <span className="text-muted-foreground"> от {firmware.date}</span>
               )}
-            </Card>
-          )}
+            </dd>
+          </dl>
 
-          {otaStatus && (
-            <Card className="border-primary/15 bg-primary/5 p-4 sm:p-5">
-              <div className="mb-3 flex items-center justify-between text-xs font-semibold uppercase tracking-[0.16em] text-primary">
-                <span className="flex items-center gap-1.5">
-                  <RefreshCw
-                    className={`size-3.5 ${isOtaActive ? "animate-spin" : ""}`}
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Button
+              variant="outline"
+              className="h-10 justify-start"
+              disabled={!online || isUploading || isOtaActive}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              {isUploading ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Upload className="size-4" />
+              )}
+              Обновить прошивку (.bin)
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".bin"
+              className="hidden"
+              onChange={handleFirmware}
+            />
+            {dangerousCommands.map((cmd) => {
+              const Icon = getCommandIcon(cmd.icon);
+              return (
+                <Button
+                  key={cmd.action}
+                  variant="outline"
+                  className="h-10 justify-start"
+                  disabled={!online || busyAction !== null}
+                  onClick={() => runDangerous(cmd)}
+                >
+                  {busyAction === cmd.action ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Icon className="size-4" />
+                  )}
+                  {cmd.title}
+                </Button>
+              );
+            })}
+            <Button
+              variant="outline"
+              className="h-10 justify-start"
+              disabled={!online}
+              onClick={() => setIsPinModalOpen(true)}
+            >
+              <Cpu className="size-4" />
+              Пины GPIO
+            </Button>
+            <Button
+              variant="outline"
+              className="h-10 justify-start"
+              disabled={!online}
+              onClick={() => setIsFileModalOpen(true)}
+            >
+              <FolderOpen className="size-4" />
+              Файлы на устройстве
+            </Button>
+          </div>
+
+          <details className="group/dev rounded-xl border border-border/60">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 text-sm font-medium [&::-webkit-details-marker]:hidden">
+              Для разработчиков
+              <ChevronDown
+                className="size-4 text-muted-foreground transition-transform group-open/dev:rotate-180"
+                aria-hidden
+              />
+            </summary>
+            <div className="space-y-4 border-t border-border/60 p-3">
+              <div>
+                <p className="mb-2 text-xs text-muted-foreground">
+                  Произвольная команда (JSON в топик{" "}
+                  <code className="font-mono">devices/{device.device_id}/command</code>)
+                </p>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input
+                    value={custom}
+                    onChange={(e) => setCustom(e.target.value)}
+                    className="h-10 rounded-lg bg-background/60 font-mono text-xs"
+                    spellCheck={false}
+                    placeholder='{ "action": "..." }'
+                    aria-label="JSON команды"
                   />
-                  Обновление прошивки
-                </span>
-                <span className="text-muted-foreground">{otaLabel}</span>
+                  <Button
+                    variant="outline"
+                    disabled={!online || busyAction !== null}
+                    onClick={sendCustom}
+                    className="h-10 shrink-0 sm:px-4"
+                  >
+                    <Send className="size-4" />
+                    Отправить
+                  </Button>
+                </div>
               </div>
-              <div className="h-2 w-full overflow-hidden rounded-full bg-border">
-                <div
-                  className={`h-full transition-all duration-500 ${otaStatus === "failed" ? "bg-destructive" : "bg-primary"}`}
-                  style={{
-                    width: `${Math.max(0, Math.min(100, otaProgress))}%`,
-                  }}
-                />
-              </div>
-              <div className="mt-2 text-right text-xs font-medium text-muted-foreground">
-                {Math.round(otaProgress)}%
-              </div>
-            </Card>
-          )}
-        </div>
-
-        {/* ── Правая колонка: управление ── */}
-        <div className="space-y-4 lg:sticky lg:top-20 lg:self-start">
-          {sketchCommands.length > 0 && (
-            <Card className="bg-card/75 p-4 sm:p-5">
-              <h2 className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                <Zap className="size-3" />
-                Управление
-              </h2>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-1">
-                {sketchCommands.map((cmd) => {
-                  const Icon = getCommandIcon(cmd.icon);
-                  const isToggle = cmd.type === "toggle";
-                  const toggleValue =
-                    toggles[cmd.action] ??
-                    getPayloadToggleValue(payload, cmd.action) ??
-                    false;
-                  const isSending = sending === cmd.action;
-                  const isAcked = ackedCommands[cmd.action] === true;
-
-                  return (
-                    <Button
-                      key={cmd.action}
-                      size="sm"
-                      variant={isToggle && toggleValue ? "default" : "outline"}
-                      disabled={!online || sending !== null}
-                      onClick={() => handleSketchCommand(cmd)}
-                      className="h-10 justify-between gap-2"
-                    >
-                      <span className="flex min-w-0 items-center gap-2 truncate">
-                        <Icon
-                          className={`size-3.5 shrink-0 ${cmd.type === "trigger" && isSending ? "animate-spin" : ""}`}
-                        />
-                        <span className="truncate">
-                          {isSending ? "…" : cmd.title}
-                        </span>
-                      </span>
-                      {isAcked && !isSending && (
-                        <span
-                          className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[10px] font-medium text-emerald-500"
-                          title="Подтверждено устройством"
-                        >
-                          <CheckCircle2 className="size-3" />
-                          <span className="hidden sm:inline">ACK</span>
-                        </span>
-                      )}
-                    </Button>
-                  );
-                })}
-              </div>
-            </Card>
-          )}
-
-          <Card className="bg-card/75 p-4 sm:p-5">
-            <h2 className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-              <Zap className="size-3" />
-              Система
-            </h2>
-            <div className="grid grid-cols-2 gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!online || sending !== null || isUploading}
-                onClick={() => fileInputRef.current?.click()}
-                className="h-10 justify-start"
-              >
-                <Upload
-                  className={`size-3.5 ${isUploading ? "animate-bounce" : ""}`}
-                />
-                {isUploading ? "OTA..." : "OTA"}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!online || sending !== null}
-                onClick={() => setIsPinModalOpen(true)}
-                className="h-10 justify-start"
-              >
-                <Cpu className="size-3.5" />
-                Пины
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!online || sending !== null}
-                onClick={() => setIsFileModalOpen(true)}
-                className="col-span-2 h-10 justify-start sm:col-span-1"
-              >
-                <FolderOpen className="size-3.5" />
-                Файлы
-              </Button>
-              <input
-                type="file"
-                accept=".bin"
-                className="hidden"
-                ref={fileInputRef}
-                onChange={handleFileUpload}
-              />
+              <CommandsReference />
             </div>
-          </Card>
+          </details>
 
-          <Card className="bg-card/75 p-4 sm:p-5">
-            <h2 className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-              <Terminal className="size-3" />
-              Произвольная команда
-            </h2>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Input
-                value={custom}
-                onChange={(e) => setCustom(e.target.value)}
-                className="h-10 rounded-xl bg-background/60 font-mono text-xs"
-                spellCheck={false}
-                placeholder='{ "action": "..." }'
-              />
+          {onDelete && (
+            <div className="flex flex-col gap-3 rounded-xl border border-destructive/25 bg-destructive/5 p-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-muted-foreground">
+                Удалить устройство из списка вместе с историей показаний.
+              </p>
               <Button
-                size="sm"
-                variant="outline"
-                disabled={!online || sending !== null}
-                onClick={sendCustom}
-                className="h-10 shrink-0 sm:px-4"
+                variant="destructive"
+                className="h-10 shrink-0"
+                disabled={isDeleting}
+                onClick={() => void handleDelete()}
               >
-                <Send className="size-3.5" />
-                {sending === "custom" ? "…" : "Отправить"}
+                {isDeleting ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Trash2 className="size-4" />
+                )}
+                {isDeleting ? "Удаляем…" : "Удалить устройство"}
               </Button>
             </div>
-          </Card>
+          )}
         </div>
-      </div>
+      </details>
 
       <PinManagerModal
         isOpen={isPinModalOpen}
         onClose={() => setIsPinModalOpen(false)}
-        onSend={async (payload) => {
-          await send(payload, "pin");
-        }}
-        isSending={sending === "pin"}
+        onSend={async (body) => run("pin", body, "Команда отправлена")}
+        isSending={busyAction === "pin"}
         latestTelemetry={device.latest}
       />
-
       <FileManagerModal
         isOpen={isFileModalOpen}
         onClose={() => setIsFileModalOpen(false)}
-        onSend={async (payload) => {
-          await send(payload, "file");
-        }}
-        isSending={sending === "file"}
+        onSend={async (body) => run("file", body, "Команда отправлена")}
+        isSending={busyAction === "file"}
         latestTelemetry={device.latest}
       />
-    </>
+    </Card>
   );
 }

@@ -6,8 +6,10 @@ import {
   Droplets,
   Gauge,
   Globe,
+  Lightbulb,
   MemoryStick,
   Signal,
+  Sun,
   Thermometer,
   Wifi,
   type LucideIcon,
@@ -27,7 +29,9 @@ const METRIC_ICON_MAP: Record<string, LucideIcon> = {
   globe: Globe,
   memory: MemoryStick,
   'memory-stick': MemoryStick,
+  lightbulb: Lightbulb,
   signal: Signal,
+  sun: Sun,
   thermometer: Thermometer,
   wifi: Wifi,
 }
@@ -53,6 +57,13 @@ export function isServiceTelemetryKey(key: string): boolean {
     normalized.startsWith('pin_') ||
     normalized.startsWith('fs_')
   )
+}
+
+function isTruthy(value: unknown): boolean {
+  if (typeof value === 'string') {
+    return ['true', '1', 'on'].includes(value.toLowerCase().trim())
+  }
+  return Boolean(value)
 }
 
 export function getMetricIcon(icon?: string): LucideIcon {
@@ -97,14 +108,27 @@ function formatMetricValue(
   if (value === null || value === undefined) return '—'
 
   if (format === 'boolean' || typeof value === 'boolean') {
-    return value ? 'Да' : 'Нет'
+    return isTruthy(value) ? 'Вкл' : 'Выкл'
   }
 
   if (format === 'text' || typeof value === 'string') {
     return String(value)
   }
 
-  const formatted = formatValue(value, key)
+  // Формат из схемы прошивки важнее догадок по имени ключа:
+  // camelion_temp — это проценты, а не °C
+  if (typeof value === 'number' && format && format !== 'number') {
+    if (format === 'percent') return `${Math.round(value)} %`
+    if (format === 'bytes') return formatValue(value, 'heap')
+    if (format === 'uptime') return formatValue(value, 'uptime')
+    if (format === 'rssi') return formatValue(value, 'rssi')
+    if (format === 'temperature') return formatValue(value, 'temperature')
+  }
+
+  const formatted =
+    format === 'number' && typeof value === 'number'
+      ? value.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
+      : formatValue(value, key)
 
   if (unit && formatted !== '—' && !formatted.includes(unit)) {
     return `${formatted} ${unit}`

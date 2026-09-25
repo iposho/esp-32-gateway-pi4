@@ -1,61 +1,34 @@
 'use client'
 
-import { useCallback, useRef } from 'react'
+import { useCallback } from 'react'
 import useSWR from 'swr'
-import Link from 'next/link'
 import { useRouter, useParams } from 'next/navigation'
-import { Home, LogOut, RefreshCw, Activity } from 'lucide-react'
-import { DashboardHeaderBrand } from '@/components/dashboard/dashboard-header-brand'
+import { RefreshCw, WifiOff } from 'lucide-react'
+import { DashboardShell } from '@/components/dashboard/dashboard-shell'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { DeviceDetailView } from '@/components/dashboard/device-detail-view'
+import { useCommandPolling } from './use-command-polling'
 import type { Device, Telemetry } from '@/lib/types'
 
 type DeviceWithLatest = Device & { latest: Telemetry | null }
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
-/** Обычный интервал опроса и ускоренный — сразу после отправки команды */
-const REFRESH_MS = 3000
-const FAST_REFRESH_MS = 700
-const FAST_REFRESH_WINDOW_MS = 8000
-
 export function DeviceDetailPage() {
   const router = useRouter()
   const params = useParams<{ deviceId: string }>()
   const deviceId = decodeURIComponent(params.deviceId)
+  const key = deviceId ? `/api/devices/${encodeURIComponent(deviceId)}` : null
 
-  // До этого момента опрашиваем чаще, чтобы быстрее увидеть ответ устройства
-  const fastUntilRef = useRef(0)
-
+  const { refreshInterval, sendCommand } = useCommandPolling(key)
   const { data, error, isLoading, mutate } = useSWR<{ device: DeviceWithLatest }>(
-    deviceId ? `/api/devices/${encodeURIComponent(deviceId)}` : null,
+    key,
     fetcher,
-    {
-      refreshInterval: () =>
-        Date.now() < fastUntilRef.current ? FAST_REFRESH_MS : REFRESH_MS,
-      keepPreviousData: true,
-    },
+    { refreshInterval, keepPreviousData: true },
   )
 
   const device = data?.device
-
-  const sendCommand = useCallback(
-    async (id: string, payload: Record<string, unknown>) => {
-      const res = await fetch('/api/command', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deviceId: id, payload }),
-      })
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}))
-        throw new Error(d.error ?? 'Ошибка')
-      }
-      fastUntilRef.current = Date.now() + FAST_REFRESH_WINDOW_MS
-      void mutate()
-    },
-    [mutate],
-  )
 
   const deleteDevice = useCallback(
     async (id: string) => {
@@ -84,65 +57,21 @@ export function DeviceDetailPage() {
       }
       await mutate(
         (current) =>
-          current?.device
-            ? { device: { ...current.device, name } }
-            : current,
+          current?.device ? { device: { ...current.device, name } } : current,
         { revalidate: true },
       )
     },
     [mutate],
   )
 
-  async function logout() {
-    await fetch('/api/auth/logout', { method: 'POST' })
-    router.replace('/')
-    router.refresh()
-  }
-
   return (
-    <div className="min-h-screen">
-      <header className="sticky top-0 z-10 border-b border-white/10 bg-background/70 backdrop-blur-2xl supports-[backdrop-filter]:bg-background/55">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
-          <DashboardHeaderBrand />
-          <div className="flex items-center gap-1.5">
-            <Button
-              variant="ghost"
-              size="sm"
-              render={<Link href="/dashboard" />}
-              nativeButton={false}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              <Home className="size-3.5" aria-hidden />
-              <span className="hidden sm:inline">Главная</span>
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => mutate()}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              <RefreshCw className={`size-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">Обновить</span>
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={logout}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              <LogOut className="size-3.5" />
-              <span className="hidden sm:inline">Выход</span>
-            </Button>
-          </div>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-7xl px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-8">
+    <DashboardShell>
+      <main className="mx-auto max-w-3xl px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-8">
         {error && (
           <Card className="mb-6 border-destructive/20 bg-destructive/10">
             <CardContent className="flex items-center gap-2 px-4 py-3 text-sm text-destructive">
-              <Activity className="size-4 shrink-0" />
-              Не удалось загрузить устройство.
+              <WifiOff className="size-4 shrink-0" />
+              Не удалось загрузить устройство. Проверьте подключение к серверу.
             </CardContent>
           </Card>
         )}
@@ -150,7 +79,7 @@ export function DeviceDetailPage() {
         {isLoading && !device ? (
           <div className="flex flex-col items-center justify-center gap-3 py-20">
             <RefreshCw className="size-5 animate-spin text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">Загрузка...</span>
+            <span className="text-sm text-muted-foreground">Загружаем…</span>
           </div>
         ) : device ? (
           <DeviceDetailView
@@ -164,14 +93,17 @@ export function DeviceDetailPage() {
             <Card className="border-dashed bg-card/50 shadow-none">
               <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
                 <h3 className="font-semibold text-foreground">Устройство не найдено</h3>
+                <p className="text-sm text-muted-foreground">
+                  Возможно, его удалили.
+                </p>
                 <Button variant="outline" size="sm" onClick={() => router.push('/dashboard')}>
-                  Вернуться к списку
+                  К списку устройств
                 </Button>
               </CardContent>
             </Card>
           )
         )}
       </main>
-    </div>
+    </DashboardShell>
   )
 }
