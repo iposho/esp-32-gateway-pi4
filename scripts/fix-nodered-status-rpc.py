@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """
-Переводит запись статуса в развёрнутом flow Node-RED на RPC set_device_status.
+Переводит запись статуса и «touch» устройства в развёрнутом flow Node-RED
+на RPC, как в node-red/flows.example.json.
 
-Старые flows делали прямой upsert POST /devices?on_conflict=device_id.
-Такой запрос не снимает «надгробие» из deleted_devices, а триггер
-devices_block_deleted (008) молча отбрасывает вставку — удалённое
-устройство никогда не возвращается, и его телеметрия не пишется (FK).
+Старые flows делали прямой upsert POST /devices?on_conflict=device_id:
+- в узле статуса — такой запрос не снимает «надгробие» из deleted_devices,
+  а триггер devices_block_deleted (008) молча отбрасывает вставку:
+  удалённое устройство никогда не возвращается, телеметрия не пишется (FK);
+- в узле телеметрии — второй выход шлёт name: deviceId и перезаписал бы
+  имя из админки, если бы не триггер preserve_custom_device_name (002).
 
-Скрипт берёт function-узел(ы) за mqtt-in `devices/+/status` в
-node-red/data/flows.json и подставляет код fn-status из
-node-red/flows.example.json. Следующий за ним http request переводится
-в режим method=use с пустым url (метод и URL задаёт function-узел).
-Перед записью делается копия flows.json.bak-<время>.
+Скрипт берёт function-узлы за mqtt-in `devices/+/status` и
+`devices/+/telemetry` в node-red/data/flows.json и подставляет код
+fn-status / fn-telemetry из node-red/flows.example.json. Следующие за ними
+http request переводятся в режим method=use с пустым url (метод и URL
+задаёт function-узел). Перед записью делается копия flows.json.bak-<время>.
 
 Запуск на Pi из корня репозитория:
   python3 scripts/fix-nodered-status-rpc.py            # применить
@@ -27,7 +30,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 FLOWS = ROOT / "node-red" / "data" / "flows.json"
 EXAMPLE = ROOT / "node-red" / "flows.example.json"
-STATUS_TOPIC = "devices/+/status"
+
+# mqtt-in топик → id эталонного function-узла в flows.example.json
+TARGETS = {
+    "devices/+/status": "fn-status",
+    "devices/+/telemetry": "fn-telemetry",
+}
 
 
 def by_id(nodes):
@@ -41,51 +49,57 @@ def targets(node, index):
 def main():
     dry_run = "--dry-run" in sys.argv[1:]
 
-    example = json.loads(EXAMPLE.read_text(encoding="utf-8"))
-    ref_func = by_id(example)["fn-status"]["func"]
+    example = by_id(json.loads(EXAMPLE.read_text(encoding="utf-8")))
+    refs = {topic: example[fn_id] for topic, fn_id in TARGETS.items()}
 
     flows = json.loads(FLOWS.read_text(encoding="utf-8"))
     index = by_id(flows)
 
-    status_in = [
-        n for n in flows
-        if n.get("type") == "mqtt in" and n.get("topic") == STATUS_TOPIC
-    ]
-    if not status_in:
-        sys.exit(f"В {FLOWS} нет mqtt-in узла с топиком {STATUS_TOPIC}")
-
     changed = []
-    for src in status_in:
-        for fn in targets(src, index):
-            if fn.get("type") != "function":
-                print(f"! {src['id']} → {fn.get('id')} ({fn.get('type')}): "
-                      "не function-узел, пропускаю — проверь вручную")
-                continue
-            if fn.get("func") != ref_func:
-                fn["func"] = ref_func
-                fn["outputs"] = 1
-                changed.append(f"function {fn['id']} ({fn.get('name', '')}): "
-                               "код заменён на POST /rpc/set_device_status")
-            for http in targets(fn, index):
-                if http.get("type") != "http request":
+    for topic, ref in refs.items():
+        sources = [
+            n for n in flows
+            if n.get("type") == "mqtt in" and n.get("topic") == topic
+        ]
+        if not sources:
+            print(f"! нет mqtt-in узла с топиком {topic} — пропускаю")
+            continue
+
+        for src in sources:
+            for fn in targets(src, index):
+                if fn.get("type") != "function":
+                    print(f"! {src['id']} → {fn.get('id')} ({fn.get('type')}): "
+                          "не function-узел, пропускаю — проверь вручную")
                     continue
-                if http.get("method") != "use" or http.get("url"):
-                    changed.append(
-                        f"http request {http['id']} ({http.get('name', '')}): "
-                        f"method {http.get('method')!r} url {http.get('url')!r} "
-                        "→ method 'use', url ''")
-                    http["method"] = "use"
-                    http["url"] = ""
+                if len(fn.get("wires", [])) != ref["outputs"]:
+                    print(f"! function {fn['id']}: выходов {len(fn.get('wires', []))}, "
+                          f"в эталоне {ref['outputs']} — пропускаю, сверь вручную")
+                    continue
+                if fn.get("func") != ref["func"]:
+                    fn["func"] = ref["func"]
+                    changed.append(f"function {fn['id']} ({fn.get('name', '')}): "
+                                   f"код заменён на {ref['id']} из flows.example.json")
+                for http in targets(fn, index):
+                    if http.get("type") != "http request":
+                        continue
+                    if http.get("method") != "use" or http.get("url"):
+                        changed.append(
+                            f"http request {http['id']} ({http.get('name', '')}): "
+                            f"method {http.get('method')!r} url {http.get('url')!r} "
+                            "→ method 'use', url ''")
+                        http["method"] = "use"
+                        http["url"] = ""
 
     # Прочие прямые upsert в devices — только предупреждаем.
+    ref_funcs = {ref["func"] for ref in refs.values()}
     for n in flows:
         if n.get("type") == "function" and "on_conflict=device_id" in n.get("func", ""):
-            if n.get("func") != ref_func:
+            if n.get("func") not in ref_funcs:
                 print(f"! function {n['id']} ({n.get('name', '')}) всё ещё делает "
                       "прямой upsert в /devices — сверь с flows.example.json")
 
     if not changed:
-        print("Изменений не требуется: статус уже пишется через set_device_status.")
+        print("Изменений не требуется: статус и touch уже идут через RPC.")
         return
 
     for line in changed:

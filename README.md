@@ -203,9 +203,12 @@ python3 scripts/fix-nodered-status-rpc.py             # применить (де
 docker compose restart nodered                        # только Node-RED, остальной стек не трогаем
 ```
 
-Скрипт находит function-узел за `mqtt in` `devices/+/status`, подставляет в
-него код `fn-status` из `flows.example.json` и переводит следующий за ним
-`http request` в режим `method: use` (метод и URL задаёт function-узел).
+Скрипт находит function-узлы за `mqtt in` `devices/+/status` и
+`devices/+/telemetry`, подставляет в них код `fn-status` / `fn-telemetry` из
+`flows.example.json` и переводит следующие за ними `http request` в режим
+`method: use` (метод и URL задаёт function-узел). Так статус идёт через
+`rpc/set_device_status`, а отметка «устройство живо» — через `rpc/touch_device`
+вместо прямого upsert с `name: deviceId`, который затирал бы имя из админки.
 Если в других узлах остался прямой upsert в `/devices`, скрипт это покажет.
 После перезапуска обнови вкладку редактора Node-RED — иначе Deploy из старой
 вкладки перезапишет исправленный flow.
@@ -588,7 +591,7 @@ lib/                     # supabase-клиент, auth (HMAC-cookie), mqtt-па�
 scripts/                 # SQL-миграции 001–010 (схема, retention, обслуживание)
 mosquitto/config/        # конфиг + ACL брокера
 node-red/                # пример flow (развёрнутый node-red/data/ — вне git)
-scripts/fix-nodered-status-rpc.py  # перевод статуса в развёрнутом flow на rpc/set_device_status
+scripts/fix-nodered-status-rpc.py  # перевод статуса/touch в развёрнутом flow на RPC (как в example)
 telegram-bot/            # Telegram ↔ MQTT bridge (+ avatar.svg, avatar.png)
 firmware/                # пример прошивки ESP32
 Dockerfile               # standalone-сборка админки
