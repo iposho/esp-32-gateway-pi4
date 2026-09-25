@@ -148,7 +148,8 @@ export function TrafficDashboard() {
           variant="ghost"
           size="sm"
           onClick={() => mutateEvents()}
-          className="text-muted-foreground hover:text-foreground"
+          aria-label="Обновить"
+          className="h-9 px-2.5 text-muted-foreground hover:text-foreground"
         >
           <RefreshCw className={`size-3.5 ${eventsLoading ? 'animate-spin' : ''}`} />
           <span className="hidden sm:inline">Обновить</span>
