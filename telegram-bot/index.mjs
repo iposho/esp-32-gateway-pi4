@@ -15,6 +15,10 @@ const {
   MQTT_URL = 'mqtt://mosquitto:1883',
   MQTT_USERNAME = '',
   MQTT_PASSWORD = '',
+  // Необязательно: имена и порядок устройств из админки (Supabase REST)
+  SUPABASE_REST = '',
+  SUPABASE_SERVICE_ROLE_KEY = '',
+  TELEGRAM_SYNC_INTERVAL = '60',
 } = process.env
 
 if (!TELEGRAM_BOT_TOKEN) {
@@ -28,36 +32,149 @@ const allowedChatIds = new Set(
     .filter(Boolean),
 )
 
-const devices = parseDeviceMap(TELEGRAM_DEVICE_MAP)
-if (devices.size === 0) {
-  throw new Error('TELEGRAM_DEVICE_MAP is required, for example balcony:esp32-balcony,flat:esp32-flat')
+// ── Реестр устройств ─────────────────────────
+//
+// Устройства подхватываются динамически: из MQTT (любое сообщение в
+// devices/<id>/status|telemetry|capabilities) и, если настроен Supabase,
+// из таблицы devices админки (оттуда же — названия и порядок).
+// TELEGRAM_DEVICE_MAP необязателен: только короткие имена для текстовых
+// команд (/status balcony) и порядок, если Supabase не подключён.
+
+/** Короткие имена из TELEGRAM_DEVICE_MAP: alias → deviceId */
+const mappedAliases = parseDeviceMap(TELEGRAM_DEVICE_MAP)
+const mappedAliasByDeviceId = new Map([...mappedAliases].map(([alias, id]) => [id, alias]))
+
+/** Ключ устройства в callback_data (лимит Telegram — 64 байта) */
+const keysByDeviceId = new Map()
+/** Все устройства: key → state */
+const state = new Map()
+
+const supabaseEnabled = Boolean(SUPABASE_REST && SUPABASE_SERVICE_ROLE_KEY)
+/** Список устройств из админки (null — ещё не загружен или Supabase не настроен) */
+let adminDevices = null
+
+function deviceKey(deviceId) {
+  const mapped = mappedAliasByDeviceId.get(deviceId)
+  if (mapped) return mapped
+  // Длинные ID сокращаем стабильным хешем, чтобы кнопки не ломались после рестарта
+  return Buffer.byteLength(deviceId) <= 32 ? deviceId : `d${fnv1a(deviceId)}`
 }
 
-const aliasesByDeviceId = new Map([...devices.entries()].map(([alias, deviceId]) => [deviceId, alias]))
+function getDevice(deviceId, { create = true } = {}) {
+  const known = keysByDeviceId.get(deviceId)
+  if (known) return state.get(known)
+  if (!create) return undefined
 
-const defaultAlias = TELEGRAM_DEFAULT_DEVICE && devices.has(TELEGRAM_DEFAULT_DEVICE)
-  ? TELEGRAM_DEFAULT_DEVICE
-  : [...devices.keys()][0]
+  const key = deviceKey(deviceId)
+  const device = {
+    alias: key,
+    deviceId,
+    name: null,
+    sortOrder: undefined,
+    status: 'unknown',
+    telemetry: {},
+    statusSeen: false,
+    capabilities: null,
+    ota: undefined,
+    lastError: undefined,
+    unresponsive: false,
+    updatedAt: null,
+  }
+  keysByDeviceId.set(deviceId, key)
+  state.set(key, device)
+  console.log(`[devices] discovered ${deviceId}`)
+  // Node-RED заводит запись в админке почти сразу — подтянем её, не дожидаясь интервала
+  if (adminDevices && !adminDevices.has(deviceId)) scheduleSync()
+  return device
+}
 
-// ── State ────────────────────────────────────
+/** Человеческое имя: из админки → из capabilities → короткое имя → ID */
+function nameOf(device) {
+  return device.name || device.capabilities?.name || device.alias || device.deviceId
+}
 
-const state = new Map(
-  [...devices.entries()].map(([alias, deviceId]) => [
-    alias,
-    {
-      alias,
-      deviceId,
-      status: 'unknown',
-      telemetry: {},
-      statusSeen: false,
-      capabilities: null,
-      ota: undefined,
-      lastError: undefined,
-      unresponsive: false,
-      updatedAt: null,
-    },
-  ]),
-)
+/**
+ * Устройства для показа, в порядке админки.
+ * Если админка подключена, показываем только то, что в ней есть:
+ * удалённое там устройство пропадает и из бота.
+ */
+function listDevices() {
+  let list = [...state.values()]
+  if (adminDevices) list = list.filter((d) => adminDevices.has(d.deviceId))
+  return list.sort((a, b) =>
+    (a.sortOrder ?? 1e6) - (b.sortOrder ?? 1e6) || nameOf(a).localeCompare(nameOf(b), 'ru'),
+  )
+}
+
+function isVisible(device) {
+  return !adminDevices || adminDevices.has(device.deviceId)
+}
+
+function getDefaultAlias() {
+  const list = listDevices()
+  const preferred = TELEGRAM_DEFAULT_DEVICE && state.get(resolveKey(TELEGRAM_DEFAULT_DEVICE))
+  if (preferred && list.includes(preferred)) return preferred.alias
+  return list[0]?.alias
+}
+
+/** alias из TELEGRAM_DEVICE_MAP, ключ или сам deviceId → ключ в state */
+function resolveKey(arg) {
+  if (!arg) return undefined
+  if (state.has(arg)) return arg
+  const byMap = mappedAliases.get(arg)
+  if (byMap) return keysByDeviceId.get(byMap) ?? getDevice(byMap).alias
+  const byId = keysByDeviceId.get(arg)
+  if (byId) return byId
+  const lower = arg.toLowerCase()
+  return listDevices().find((d) => nameOf(d).toLowerCase() === lower)?.alias
+}
+
+// Устройства из TELEGRAM_DEVICE_MAP видны сразу, ещё до первого сообщения
+mappedAliases.forEach((deviceId, alias) => {
+  getDevice(deviceId).sortOrder = [...mappedAliases.keys()].indexOf(alias)
+})
+
+// ── Синхронизация с админкой (Supabase) ──────
+
+async function syncFromAdmin() {
+  try {
+    const res = await fetch(`${SUPABASE_REST}/devices?select=device_id,name,metadata`, {
+      headers: {
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      },
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const rows = await res.json()
+    adminDevices = new Set(rows.map((r) => r.device_id))
+    for (const row of rows) {
+      const device = getDevice(row.device_id)
+      device.name = row.name && row.name !== row.device_id ? row.name : null
+      const order = Number(row.metadata?.sort_order)
+      device.sortOrder = Number.isFinite(order) ? order : undefined
+      if (!device.capabilities && Array.isArray(row.metadata?.commands)) {
+        device.capabilities = normalizeCapabilities(row.metadata)
+      }
+    }
+  } catch (error) {
+    // Бот — резервный канал: без Supabase продолжаем работать по MQTT
+    console.error('[supabase] sync failed:', error.message)
+  }
+}
+
+let syncTimer = null
+function scheduleSync() {
+  if (!supabaseEnabled || syncTimer) return
+  syncTimer = setTimeout(() => {
+    syncTimer = null
+    void syncFromAdmin()
+  }, 3000)
+}
+
+if (supabaseEnabled) {
+  void syncFromAdmin()
+  setInterval(syncFromAdmin, Math.max(10, Number(TELEGRAM_SYNC_INTERVAL) || 60) * 1000)
+}
 
 let telegramOffset = 0
 
@@ -89,13 +206,16 @@ mqttClient.on('error', (error) => {
 
 mqttClient.on('message', (topic, payloadBuffer) => {
   const [, deviceId, kind] = topic.split('/')
-  const alias = aliasesByDeviceId.get(deviceId)
-  if (!alias) return
-
-  const device = state.get(alias)
-  if (!device) return
+  if (!deviceId || !['status', 'telemetry', 'capabilities'].includes(kind)) return
 
   const payload = parsePayload(payloadBuffer)
+  // Пустой retained (админка стирает его при удалении) — не повод заводить устройство
+  if (payload === '' && !keysByDeviceId.has(deviceId)) return
+
+  const device = getDevice(deviceId)
+  const name = nameOf(device)
+  // Удалённые в админке устройства не шумят уведомлениями
+  const notify = (...args) => (isVisible(device) ? notifyAll(...args) : undefined)
 
   // Retained-описание команд/метрик из скетча — не считаем «признаком жизни»
   if (kind === 'capabilities') {
@@ -126,8 +246,8 @@ mqttClient.on('message', (topic, payloadBuffer) => {
       const telemLine = telemParts.length > 0 ? `
 📊 ${telemParts.join('  ·  ')}` : ''
 
-      void notifyAll(
-        `${statusEmoji(nextStatus)} <b>${escapeHtml(alias)}</b>${detail}${telemLine}`,
+      void notify(
+        `${statusEmoji(nextStatus)} <b>${escapeHtml(name)}</b>${detail}${telemLine}`,
         deviceKeyboard(device),
       )
     } else if (wasUnresponsive && nextStatus === 'online') {
@@ -135,8 +255,8 @@ mqttClient.on('message', (topic, payloadBuffer) => {
             ? formatUptime(Math.round((Date.now() - device._unresponsiveSince) / 1000))
             : null
           delete device._unresponsiveSince
-          void notifyAll(
-            `🟢 <b>${escapeHtml(alias)}</b>\nСнова на связи` +
+          void notify(
+            `🟢 <b>${escapeHtml(name)}</b>\nСнова на связи` +
             (silenceDuration ? ` после ${silenceDuration} молчания` : '')
           )
     }
@@ -150,15 +270,15 @@ mqttClient.on('message', (topic, payloadBuffer) => {
     resolveTelemetryWaiters(device.deviceId)
 
     if (wasUnresponsive) {
-      void notifyAll(
-        `🟢 <b>${escapeHtml(alias)}</b>\nСнова на связи — получена телеметрия`
+      void notify(
+        `🟢 <b>${escapeHtml(name)}</b>\nСнова на связи — получена телеметрия`
       )
     }
 
     const errorText = typeof telemetry.error === 'string' && telemetry.error.trim() ? telemetry.error.trim() : null
     if (errorText && errorText !== device.lastError) {
       device.lastError = errorText
-      void notifyAll(`🚨 <b>${escapeHtml(alias)}</b>\nОшибка: <code>${escapeHtml(errorText)}</code>`)
+      void notify(`🚨 <b>${escapeHtml(name)}</b>\nОшибка: <code>${escapeHtml(errorText)}</code>`)
     } else if (!errorText) {
       device.lastError = undefined
     }
@@ -166,7 +286,7 @@ mqttClient.on('message', (topic, payloadBuffer) => {
     if (typeof telemetry.ota === 'string' && telemetry.ota !== device.ota) {
       device.ota = telemetry.ota
       if (telemetry.ota === 'failed' || telemetry.ota === 'success') {
-        void notifyAll(formatOtaNotification(alias, telemetry))
+        void notify(formatOtaNotification(name, telemetry))
       }
     }
   }
@@ -181,7 +301,7 @@ if (offlineTimeoutMs > 0) {
 
 function checkUnresponsiveDevices() {
   const now = Date.now()
-  for (const device of state.values()) {
+  for (const device of listDevices()) {
     if (device.unresponsive || device.status !== 'online' || !device.updatedAt) continue
     if (now - device.updatedAt.getTime() < offlineTimeoutMs) continue
 
@@ -189,7 +309,7 @@ function checkUnresponsiveDevices() {
     device._unresponsiveSince = now
     const silentFor = Math.round((now - device.updatedAt.getTime()) / 1000)
     void notifyAll(
-      `⚠️ <b>${escapeHtml(device.alias)}</b>\nНе выходит на связь ${formatUptime(silentFor)} — возможно, офлайн`,
+      `⚠️ <b>${escapeHtml(nameOf(device))}</b>\nНе выходит на связь ${formatUptime(silentFor)} — возможно, офлайн`,
     )
   }
 }
@@ -263,7 +383,7 @@ async function handleCommand(chatId, text) {
   }
 
   if (command === '/status') {
-    await sendDeviceStatus(chatId, resolveAlias(args[0]))
+    await sendDeviceStatus(chatId, resolveAlias(args.join(' ')))
     return
   }
 
@@ -273,7 +393,7 @@ async function handleCommand(chatId, text) {
   }
 
   if (command === '/commands') {
-    await sendDeviceStatus(chatId, resolveAlias(args[0]))
+    await sendDeviceStatus(chatId, resolveAlias(args.join(' ')))
     return
   }
 
@@ -288,8 +408,12 @@ async function handleCommand(chatId, text) {
   }
 
   if (command === '/reboot') {
-    const alias = resolveAlias(args[0])
-    await sendMessage(chatId, `⚠️ Подтвердить перезагрузку <b>${escapeHtml(alias)}</b>?`, {
+    const alias = resolveAlias(args.join(' '))
+    if (!alias) {
+      await sendMessage(chatId, noDevicesText())
+      return
+    }
+    await sendMessage(chatId, `⚠️ Подтвердить перезагрузку <b>${escapeHtml(nameOf(state.get(alias)))}</b>?`, {
       inline_keyboard: [[
         { text: '🔄 Перезагрузить', callback_data: `confirm:reboot:${alias}` },
         { text: '✖️ Отмена', callback_data: `dev:${alias}` },
@@ -328,7 +452,7 @@ async function handleLed(chatId, args) {
 }
 
 async function handleCapture(chatId, args) {
-  const alias = resolveAlias(args[0])
+  const alias = resolveAlias(args.join(' '))
   const device = state.get(alias)
   if (!device) {
     await sendMessage(chatId, 'Устройство не найдено.', devicesKeyboard())
@@ -349,7 +473,7 @@ async function handleCapture(chatId, args) {
     } catch {
       await sendMessage(
         chatId,
-        `📸 Команда отправлена в <b>${escapeHtml(alias)}</b>\nНе удалось получить снимок по ранее известному URL.`,
+        `📸 Команда отправлена в <b>${escapeHtml(nameOf(device))}</b>\nНе удалось получить снимок по ранее известному URL.`,
         deviceKeyboard(device),
       )
     }
@@ -432,7 +556,7 @@ async function handleCallback(query) {
     await render(
       chatId,
       messageId,
-      `${commandEmoji(cmd)} <b>${escapeHtml(cmd.title)}</b> на <b>${escapeHtml(device.alias)}</b>?\n\n` +
+      `${commandEmoji(cmd)} <b>${escapeHtml(cmd.title)}</b> на <b>${escapeHtml(nameOf(device))}</b>?\n\n` +
         (cmd.description ? `<i>${escapeHtml(cmd.description)}</i>\n\n` : '') +
         'Подтвердите действие.',
       {
@@ -475,15 +599,14 @@ async function handleCallback(query) {
 }
 
 function normalizeDeviceArg(args) {
-  if (args.length === 0) return [defaultAlias]
-  if (devices.has(args[0])) return args
-  return [defaultAlias, ...args]
+  if (args.length === 0) return [getDefaultAlias()]
+  const key = resolveKey(args[0])
+  if (key) return [key, ...args.slice(1)]
+  return [getDefaultAlias(), ...args]
 }
 
 function resolveAlias(alias) {
-  if (!alias) return defaultAlias
-  if (devices.has(alias)) return alias
-  return defaultAlias
+  return resolveKey(alias) ?? getDefaultAlias()
 }
 
 // ═══════════════════════════════════════════
@@ -498,7 +621,7 @@ async function sendDeviceStatus(chatId, alias) {
 async function showDevice(chatId, alias, messageId, note) {
   const device = state.get(resolveAlias(alias))
   if (!device) {
-    await sendMessage(chatId, '❌ Устройство не найдено.', devicesKeyboard())
+    await render(chatId, messageId, devicesText(), devicesKeyboard())
     return
   }
   const text = formatDeviceStatus(device) + (note ? `\n\n${note}` : '')
@@ -585,7 +708,7 @@ async function publishCommand(chatId, alias, payload) {
 function formatDeviceStatus(device) {
   const telemetry = device.telemetry ?? {}
   const lines = [
-    `${deviceEmoji(device)} <b>${escapeHtml(device.alias)}</b>  ·  ${statusLabel(device)}`,
+    `${deviceEmoji(device)} <b>${escapeHtml(nameOf(device))}</b>  ·  ${statusLabel(device)}`,
     `<code>${escapeHtml(device.deviceId)}</code>` +
       (device.updatedAt ? `  ·  ${timeAgo(device.updatedAt)}` : ''),
   ]
@@ -728,16 +851,18 @@ function helpText() {
     '',
     '━━━━━━━━━━━━━━━━━━',
     '',
-    `📌 <b>Устройство по умолчанию:</b> ${escapeHtml(defaultAlias)}`,
-    ...(devices.size > 1
-      ? [`👥 <b>Всего устройств:</b> ${devices.size}`]
+    ...(getDefaultAlias()
+      ? [`📌 <b>Устройство по умолчанию:</b> ${escapeHtml(nameOf(state.get(getDefaultAlias())))}`]
+      : []),
+    ...(listDevices().length > 1
+      ? [`👥 <b>Всего устройств:</b> ${listDevices().length}`]
       : []),
   ].join('\n')
 }
 
 function dashboardText() {
-  const all = [...state.values()]
-  if (all.length === 0) return '📊 <b>Сводка</b>\n\nНет зарегистрированных устройств.'
+  const all = listDevices()
+  if (all.length === 0) return '📊 <b>Сводка</b>\n\n' + noDevicesText()
 
   const count = (fn) => all.filter(fn).length
   const online = count((d) => d.status === 'online' && !d.unresponsive)
@@ -754,7 +879,7 @@ function dashboardText() {
   const lines = ['📊 <b>Сводка по устройствам</b>', counters, '']
 
   for (const device of all) {
-    lines.push(`${deviceEmoji(device)} <b>${escapeHtml(device.alias)}</b>` +
+    lines.push(`${deviceEmoji(device)} <b>${escapeHtml(nameOf(device))}</b>` +
       (device.updatedAt ? `  <i>${timeAgo(device.updatedAt)}</i>` : ''))
     const summary = summaryParts(device)
     if (summary.length) lines.push(`<blockquote>${summary.join('  ·  ')}</blockquote>`)
@@ -790,7 +915,12 @@ function summaryParts(device) {
 }
 
 function devicesText() {
+  if (listDevices().length === 0) return '📟 <b>Устройства</b>\n\n' + noDevicesText()
   return '📟 <b>Устройства</b>\n\nВыберите устройство:'
+}
+
+function noDevicesText() {
+  return 'Устройств пока нет — они появятся здесь сами, как только выйдут на связь по MQTT.'
 }
 
 // ═══════════════════════════════════════════
@@ -812,12 +942,12 @@ function mainKeyboard() {
 }
 
 function devicesKeyboard() {
-  const list = [...state.values()]
+  const list = listDevices()
   const rows = []
   for (let i = 0; i < list.length; i += 2) {
     rows.push(
       list.slice(i, i + 2).map((d) => ({
-        text: `${deviceEmoji(d)} ${d.alias}`,
+        text: `${deviceEmoji(d)} ${nameOf(d)}`,
         callback_data: `dev:${d.alias}`,
       })),
     )
@@ -1037,6 +1167,16 @@ function formatBytes(bytes) {
 // ═══════════════════════════════════════════
 //  Utility — MQTT / payload
 // ═══════════════════════════════════════════
+
+/** Короткий стабильный хеш строки (FNV-1a, 32 бита) */
+function fnv1a(str) {
+  let hash = 0x811c9dc5
+  for (const byte of Buffer.from(str)) {
+    hash ^= byte
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return hash.toString(36)
+}
 
 function parseDeviceMap(raw) {
   const map = new Map()

@@ -93,18 +93,25 @@ services:
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_ALLOWED_CHAT_IDS: ${TELEGRAM_ALLOWED_CHAT_IDS:-}
-      TELEGRAM_DEVICE_MAP: ${TELEGRAM_DEVICE_MAP:-balcony:esp32-balcony,flat:esp32-flat,cam:esp32-cam}
-      TELEGRAM_DEFAULT_DEVICE: ${TELEGRAM_DEFAULT_DEVICE:-balcony}
+      # Устройства бот находит сам (по MQTT и из админки).
+      # DEVICE_MAP необязателен: короткие имена для текстовых команд, напр. balcony:esp32-balcony
+      TELEGRAM_DEVICE_MAP: ${TELEGRAM_DEVICE_MAP:-}
+      TELEGRAM_DEFAULT_DEVICE: ${TELEGRAM_DEFAULT_DEVICE:-}
       TELEGRAM_POLL_TIMEOUT: ${TELEGRAM_POLL_TIMEOUT:-30}
       # Через сколько секунд тишины считать online-устройство пропавшим (0 — выключить)
       TELEGRAM_OFFLINE_TIMEOUT: ${TELEGRAM_OFFLINE_TIMEOUT:-120}
       MQTT_URL: mqtt://mosquitto:1883
       MQTT_USERNAME: ${TELEGRAM_MQTT_USERNAME:-telegram}
       MQTT_PASSWORD: ${TELEGRAM_MQTT_PASSWORD:-}
+      # Названия и порядок устройств из админки; удалённые в админке скрываются.
+      # Если Supabase недоступен, бот продолжает работать только по MQTT.
+      SUPABASE_REST: ${SUPABASE_REST:-http://kong:8000/rest/v1}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
     depends_on:
       - mosquitto
     networks:
       - esp32-internal
+      - supabase
 
   camelion-bridge:
     build:

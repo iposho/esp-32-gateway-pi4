@@ -207,8 +207,9 @@ SELECT jobid, jobname, schedule, command FROM cron.job WHERE jobname = 'cleanup-
 
 ## 4. Настройка Telegram-бота
 
-Telegram-бот работает как резервный пульт управления: он не ходит в Supabase,
-а напрямую слушает MQTT и публикует команды в те же топики, что и админка.
+Telegram-бот работает как резервный пульт управления: он напрямую слушает MQTT
+и публикует команды в те же топики, что и админка. Supabase ему не обязателен —
+если он доступен, бот берёт оттуда только названия и порядок устройств.
 Команды можно отправлять как текстом, так и через inline-кнопки.
 
 1. Создай бота через `@BotFather`:
@@ -227,17 +228,37 @@ Telegram-бот работает как резервный пульт управ
    TELEGRAM_BOT_TOKEN=123456:replace-with-bot-token
    TELEGRAM_ALLOWED_CHAT_IDS=123456789
 
-   TELEGRAM_DEVICE_MAP=balcony:esp32-balcony,flat:esp32-flat,cam:esp32-cam
-   TELEGRAM_DEFAULT_DEVICE=balcony
-
    TELEGRAM_MQTT_USERNAME=telegram
    TELEGRAM_MQTT_PASSWORD=<пароль пользователя telegram из mosquitto_passwd>
    ```
 
-`TELEGRAM_DEVICE_MAP` задаёт короткие имена для команд в Telegram:
-- `balcony` → `devices/esp32-balcony/...`
-- `flat` → `devices/esp32-flat/...`
-- `cam` → `devices/esp32-cam/...`
+### Список устройств
+
+Устройства в боте появляются сами — прописывать их не нужно:
+
+- **из MQTT** — любое устройство, приславшее `status`, `telemetry` или
+  `capabilities` в `devices/<id>/...`, сразу попадает в клавиатуру
+  «📟 Устройства»;
+- **из админки** (если заданы `SUPABASE_REST` и `SUPABASE_SERVICE_ROLE_KEY` —
+  в `docker-compose.yml` они уже прокинуты, контейнер подключён к сети
+  `supabase`) — бот раз в `TELEGRAM_SYNC_INTERVAL` секунд (60 по умолчанию)
+  подтягивает список `devices`: названия и порядок как в админке, устройства,
+  которые ещё молчат, тоже видны. Удалённое в админке устройство пропадает и
+  из бота, уведомления о нём не приходят. Если Supabase недоступен, бот
+  продолжает работать только по MQTT.
+
+Необязательные настройки:
+
+```env
+# Короткие имена для текстовых команд: /status balcony, /led balcony on
+TELEGRAM_DEVICE_MAP=balcony:esp32-balcony,flat:esp32-flat
+# Устройство для команд без имени (/reboot, /capture); иначе первое в списке
+TELEGRAM_DEFAULT_DEVICE=balcony
+```
+
+В текстовых командах устройство можно указать коротким именем из
+`TELEGRAM_DEVICE_MAP`, его `device_id` или названием из админки
+(`/status Спальня`).
 
 Доступ разрешён только chat id из `TELEGRAM_ALLOWED_CHAT_IDS`. Если список
 пустой, бот будет игнорировать все входящие сообщения.
