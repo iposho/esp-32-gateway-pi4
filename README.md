@@ -83,6 +83,19 @@ flowchart LR
    Скрипт создаёт функцию от имени `supabase_admin` — применяй его
    от той же роли, иначе получишь `must be owner of function`.
 
+   Последним выполни `scripts/010_retention.sql` — сроки хранения данных
+   (30 дней для `telemetry`, 7 дней для `mqtt_events`) и cron-джобы
+   pg_cron, которые их чистят. Подробности — в разделе
+   [«9. Обслуживание БД»](#9-обслуживание-бд).
+
+   Скрипты 009 и 010 меняют принадлежащие `supabase_admin` функции и
+   таблицы, поэтому и применять их нужно от этой роли:
+
+   ```bash
+   docker exec -i supabase-db psql -U supabase_admin -d postgres \
+     < scripts/010_retention.sql
+   ```
+
 2. **Узнать имя docker-сети** Supabase-стека:
    ```bash
    docker network ls | grep supabase
@@ -353,13 +366,106 @@ esp32.kuzyak.in {
 4. Устройство может публиковать прогресс скачивания в телеметрию (`{"ota":"downloading","progress":40}`).
 5. В интерфейсе карточки устройства автоматически появляется прогресс-бар обновления.
 
+## 9. Обслуживание БД
+
+### Retention (сроки хранения)
+
+`scripts/010_retention.sql` заводит две функции и две cron-джобы
+(pg_cron внутри Postgres, время в UTC):
+
+| Таблица | Хранение | Джоба | Расписание |
+|---------|----------|-------|------------|
+| `telemetry` | 30 дней | `cleanup-telemetry` | ежедневно 04:00 |
+| `mqtt_events` | 7 дней | `cleanup-mqtt-events` | ежедневно 03:00 |
+
+Столько, сколько нужно интерфейсу, хватило бы и меньше: `/api/flamingo`
+читает окно 24 ч, страница устройства — последние 50 строк телеметрии.
+30 дней оставлены с запасом на ручной разбор инцидентов.
+
+```sql
+-- проверить, что джобы живы и отрабатывают
+select jobid, jobname, schedule, command from cron.job order by jobid;
+select jobid, status, return_message, start_time
+  from cron.job_run_details order by start_time desc limit 5;
+```
+
+Обе функции вызываются только из `pg_cron`: `EXECUTE` отозван у
+`public`, `anon` и `authenticated`. Без этого любой вошедший в админку
+мог бы позвать их через PostgREST как RPC — например
+`cleanup_telemetry(0)` — и стереть всю историю.
+
+### Разгрести накопившийся backlog
+
+Штатная джоба удаляет всё устаревшее за один вызов. Если накопились
+миллионы строк, удаляй порциями — каждый вызов идёт своей транзакцией
+(второй аргумент включает пакетный режим):
+
+```bash
+for i in $(seq 1 60); do
+  n=$(docker exec supabase-db psql -U postgres -d postgres -tAc \
+    "select public.cleanup_mqtt_events(7, 50000);" | tr -d ' \n')
+  echo "удалено: $n"
+  [ "$n" -lt 50000 ] && break
+done
+```
+
+### Bloat и autovacuum
+
+`telemetry` и `mqtt_events` постоянно растут и постоянно чистятся.
+Порог autovacuum по умолчанию (20 % от размера таблицы) для них слишком
+грубый: на 1,2 млн строк это ~250 тыс. мёртвых кортежей, которых можно
+и не дождаться. Скрипты 009 и 010 ставят обеим таблицам
+`autovacuum_vacuum_scale_factor = 0.02` — чистка стартует примерно на
+25 тыс. мёртвых строк.
+
+```sql
+-- если раздувание всё же накопилось
+select relname, n_live_tup, n_dead_tup,
+       pg_size_pretty(pg_total_relation_size(relid))
+  from pg_stat_user_tables
+ where relname in ('telemetry', 'mqtt_events');
+
+set max_parallel_maintenance_workers = 0;  -- см. следующий раздел
+vacuum (analyze) public.telemetry;
+```
+
+Обычный `VACUUM` не уменьшает файл на диске, а только помечает место
+свободным для повторного использования. Вернуть место ОС умеет
+`VACUUM FULL`, но он блокирует таблицу — при 67 ГБ свободного места это
+не срочно.
+
+### /dev/shm в контейнере Supabase
+
+Docker по умолчанию даёт контейнеру 64 МБ `/dev/shm`, а PostgreSQL
+использует его для dynamic shared memory. При таком размере падают
+параллельный `VACUUM` и параллельные запросы:
+
+```
+ERROR: could not resize shared memory segment "/PostgreSQL.…" to 67151648 bytes:
+No space left on device
+```
+
+Лечится в `docker-compose.yml` Supabase-стека, сервис `db`:
+
+```yaml
+  db:
+    container_name: supabase-db
+    shm_size: 1gb
+```
+
+```bash
+cd ~/Projects/supabase/docker
+docker compose up -d db      # данные в ./volumes/db/data не затрагиваются
+docker exec supabase-db df -h /dev/shm   # должно быть 1.0G
+```
+
 ## Структура проекта
 
 ```
 app/                     # Next.js: страницы, API-роуты (auth, devices, command)
 components/              # UI и дашборд
 lib/                     # supabase-клиент, auth (HMAC-cookie), mqtt-паблишер
-scripts/001_schema.sql   # схема БД для Supabase
+scripts/                 # SQL-миграции 001–010 (схема, retention, обслуживание)
 mosquitto/config/        # конфиг + ACL брокера
 node-red/                # пример flow
 telegram-bot/            # Telegram ↔ MQTT bridge (+ avatar.svg, avatar.png)
@@ -407,3 +513,38 @@ docker-compose.yml       # единый стек
 2. Проверь Mosquitto: `docker compose logs mosquitto`.
 3. Проверь Node-RED: открыть `http://<IP_Pi>:1880`, посмотреть Debug-панель.
 4. Убедись, что в таблице `devices` появилась запись с `device_id`.
+
+### 🗑️ Устройство не удаляется: statement timeout
+
+Симптом: в логах админки `[DELETE Device] Purge error: canceling statement
+  due to statement timeout`, устройство остаётся на дашборде.
+
+**Причина:** PostgREST подключается ролью `authenticator` с
+`statement_timeout = 8s`, и этот лимит наследуют запросы админки. Пока
+история устройства удалялась одним каскадным `DELETE`, на раздутой
+таблице (`telemetry` в миллионы строк) запрос не укладывался в 8 секунд.
+
+**Решение:** должны быть применены `scripts/007_purge_device_rows.sql`
+(удаление пачками), `scripts/008_block_deleted_devices.sql` и
+`scripts/009_purge_speedup_and_autovacuum.sql` — последний даёт функции
+свой `statement_timeout`, ищет строки по `ctid` и включает autovacuum.
+
+```sql
+select proconfig from pg_proc where proname = 'purge_device_rows';
+-- ожидаем {statement_timeout=120s,lock_timeout=30s}
+```
+
+Если устройство уже помечено удалённым в `deleted_devices`, но строка в
+`devices` осталась, домели очистку вручную:
+
+```sql
+do $$
+declare n int;
+begin
+  loop
+    n := public.purge_device_rows('<device_id>', 5000);
+    exit when n = 0;
+  end loop;
+end $$;
+delete from public.devices where device_id = '<device_id>';
+```
