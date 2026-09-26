@@ -16,7 +16,8 @@ export function getBirdfeederDeviceId(): string {
 const STATE_TTL_MS = 5_000
 const FRAME_TTL_MS = 1_000
 const BIRD_PHOTO_TTL_MS = 10 * 60_000
-const BIRD_PHOTO_CACHE_SIZE = 8
+const BIRD_PHOTO_CACHE_SIZE = 24
+const BIRD_SHOTS_TTL_MS = 10_000
 const DB_TIMEOUT_MS = 2_000
 const CAMERA_TIMEOUT_MS = 5_000
 /** Сколько последних строк телеметрии смотреть: OTA/fs-события идут без полей камеры */
@@ -130,19 +131,39 @@ export const getCameraState = cached(STATE_TTL_MS, loadState)
 
 export class CameraUnavailableError extends Error {}
 
+/**
+ * Веб-сервер ESP32 обслуживает один запрос за раз: параллельные запросы
+ * (лента из десятка снимков + живой кадр) копятся в его очереди и ловят таймаут.
+ * Поэтому все запросы к камере идут строго по одному.
+ */
+let cameraQueue: Promise<unknown> = Promise.resolve()
+
+function enqueueCamera<T>(task: () => Promise<T>): Promise<T> {
+  const run = cameraQueue.then(task, task)
+  cameraQueue = run.catch(() => undefined)
+  return run
+}
+
+function fetchCamera(url: string, accept: string): Promise<Response> {
+  return enqueueCamera(async () => {
+    let res: Response
+    try {
+      res = await fetch(url, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(CAMERA_TIMEOUT_MS),
+        headers: { Accept: accept },
+      })
+    } catch (e) {
+      throw new CameraUnavailableError(`camera fetch failed: ${(e as Error).message}`)
+    }
+    if (!res.ok) throw new CameraUnavailableError(`camera responded ${res.status}`)
+    // Тело читаем внутри очереди: пока оно не дочитано, камера занята
+    return new Response(await res.arrayBuffer(), { headers: res.headers })
+  })
+}
+
 async function fetchJpeg(url: string): Promise<ArrayBuffer> {
-  let res: Response
-  try {
-    res = await fetch(url, {
-      cache: 'no-store',
-      signal: AbortSignal.timeout(CAMERA_TIMEOUT_MS),
-      headers: { Accept: 'image/jpeg' },
-    })
-  } catch (e) {
-    throw new CameraUnavailableError(`camera fetch failed: ${(e as Error).message}`)
-  }
-  if (!res.ok) throw new CameraUnavailableError(`camera responded ${res.status}`)
-  return res.arrayBuffer()
+  return (await fetchCamera(url, 'image/jpeg')).arrayBuffer()
 }
 
 async function requireBaseUrl(): Promise<string> {
@@ -181,3 +202,24 @@ export function getBirdPhoto(id: number): Promise<CameraImage> {
   }
   return image
 }
+
+export type BirdShot = {
+  /** id снимка на SD — для /api/camera/birdfeeder/bird?id= */
+  id: number
+  /** Время визита (ISO) */
+  at: string
+}
+
+/** Последние снимки с птицами, новые первыми (журнал камеры, до 24 штук) */
+export const getBirdShots = cached(BIRD_SHOTS_TTL_MS, async (): Promise<BirdShot[]> => {
+  const baseUrl = await requireBaseUrl()
+  const raw = (await (await fetchCamera(`${baseUrl}/birds.json`, 'application/json')).json()) as {
+    shots?: Array<{ id?: unknown; at?: unknown }>
+  }
+  const shots: BirdShot[] = []
+  for (const shot of raw.shots ?? []) {
+    const at = epochToIso(shot.at)
+    if (typeof shot.id === 'number' && at) shots.push({ id: shot.id, at })
+  }
+  return shots
+})

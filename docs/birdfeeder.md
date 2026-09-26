@@ -9,6 +9,7 @@
 esp32-bird-cam (LAN)                         Pi: esp32-admin                     kuzyak.in (Vercel)
  ├ /latest.jpg  кадр из RAM, 1 fps ───▶ /api/camera/birdfeeder/frame  1 с ─▶ /api/birdfeeder/frame/?b=<окно 2 с>  CDN s-maxage=10
  ├ /photo?id=N  снимок птицы с SD ───▶ /api/camera/birdfeeder/bird   10 мин ▶ /api/birdfeeder/bird/?id=N        CDN 1 ч
+ ├ /birds.json  журнал снимков ────▶ /api/camera/birdfeeder/birds 10 с ─▶ /api/birdfeeder/birds/              CDN 15 с
  └ MQTT telemetry: bird_last_at, ──▶ Node-RED → Supabase ─▶ /api/camera/birdfeeder 5 с ▶ /api/birdfeeder/  CDN 5 с
    bird_visits_today, daylight,
    motion, bird_photo_id, last_photo_url (IP камеры)
@@ -19,7 +20,7 @@ esp32-bird-cam (LAN)                         Pi: esp32-admin                    
 
 ## Эндпоинты шлюза
 
-Все три — под тем же `CAMERA_API_TOKEN`, что и `/api/camera/latest`
+Все четыре — под тем же `CAMERA_API_TOKEN`, что и `/api/camera/latest`
 (`Authorization: Bearer …` или `?token=`), CORS открыт.
 
 | Метод | Путь | Ответ |
@@ -27,6 +28,7 @@ esp32-bird-cam (LAN)                         Pi: esp32-admin                    
 | GET | `/api/camera/birdfeeder` | JSON `{ online, daylight, motion, birdLastAt, visitsToday, birdPhotoId, updatedAt }` |
 | GET | `/api/camera/birdfeeder/frame` | JPEG — живой кадр (кэш 1 с, 503 если камера офлайн) |
 | GET | `/api/camera/birdfeeder/bird?id=N` | JPEG — снимок с птицей с SD (без `id` — последний) |
+| GET | `/api/camera/birdfeeder/birds` | JSON `{ shots: [{ id, at }] }` — последние снимки с птицами (до 24, новые первыми; кэш 10 с) |
 
 ## Переменные `.env`
 
