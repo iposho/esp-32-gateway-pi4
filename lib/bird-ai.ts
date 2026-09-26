@@ -1,5 +1,4 @@
-import { generateText, Output } from 'ai'
-import { z } from 'zod'
+import { generateText } from 'ai'
 
 /**
  * Распознавание птиц на снимке с кормушки через Vercel AI Gateway.
@@ -41,47 +40,112 @@ export function getBirdAiModel(): string {
   return process.env.BIRD_AI_MODEL || DEFAULT_MODEL
 }
 
-const resultSchema = z.object({
-  bird: z.boolean().describe('Есть ли на снимке живая птица'),
-  count: z.number().int().min(0).max(50).describe('Сколько птиц видно'),
-  species: z
-    .string()
-    .nullable()
-    .describe('Русское название вида самой заметной птицы; null, если птицы нет или вид не определить'),
-  latin: z.string().nullable().describe('Латинское название вида; null, если species = null'),
-  confidence: z.number().min(0).max(1).describe('Уверенность в виде, 0..1; 0, если species = null'),
-})
-
-export type BirdAiResult = z.infer<typeof resultSchema> & {
+export type BirdAiResult = {
+  bird: boolean
+  count: number
+  species: string | null
+  latin: string | null
+  confidence: number
   model: string
   inputTokens: number | null
   outputTokens: number | null
 }
 
+/*
+ * Output.object здесь не годится: mimo-v2.6-flash заявлен со structured output,
+ * но схему игнорирует и отвечает произвольным JSON («есть птица»: «нет»).
+ * Поэтому просим JSON словами и разбираем ответ терпимо к ключам и типам.
+ */
 function buildPrompt(): string {
   const region = process.env.BIRDFEEDER_REGION || DEFAULT_REGION
   return [
-    `Снимок с камеры у птичьей кормушки (${region}). Камера дешёвая: кадр мелкий,`,
-    'бывает смазан, пересвечен или с цветовым шумом. Внизу слева — метка времени, её игнорируй.',
-    'Снимок сделан по детектору движения, поэтому часто на нём нет птицы: ветки, тени,',
-    'смена освещения, насекомые, кошки, люди. Такие случаи — bird=false.',
+    `Photo from a cheap camera at a bird feeder (${region}). The image may be small, blurry,`,
+    'overexposed or noisy. Ignore the timestamp in the bottom-left corner.',
+    'It was taken by a motion detector, so often there is no bird at all: branches, shadows,',
+    'lighting changes, insects, cats, people. In that case bird=false.',
     '',
-    'Определи вид только если уверен по видимым признакам (окраска, форма клюва, размер).',
-    'Если птица есть, но вид не разобрать — species=null, confidence=0. Не угадывай.',
-    `Чаще всего здесь бывают: ${REGION_SPECIES.join(', ')}.`,
-    'Другие виды региона тоже возможны.',
+    'Name the species only if visible features (plumage, beak shape, size) make you sure.',
+    'If there is a bird but the species is unclear, use species=null and confidence=0. Do not guess.',
+    `Common visitors here: ${REGION_SPECIES.join(', ')}. Other regional species are possible.`,
+    '',
+    'Reply with ONLY this JSON object, no markdown, no other text, keys exactly as shown:',
+    '{"bird": true or false, "count": number of birds, "species": "Russian common name" or null,',
+    ' "latin": "Latin name" or null, "confidence": 0..1}',
   ].join('\n')
+}
+
+function extractJson(text: string): Record<string, unknown> {
+  const from = text.indexOf('{')
+  const to = text.lastIndexOf('}')
+  if (from >= 0 && to > from) {
+    try {
+      const value = JSON.parse(text.slice(from, to + 1))
+      if (value && typeof value === 'object' && !Array.isArray(value)) return value
+    } catch {
+      // ниже — общая ошибка с началом ответа
+    }
+  }
+  throw new Error(`model reply is not JSON: ${text.slice(0, 200).replace(/\s+/g, ' ')}`)
+}
+
+/** Значение по первому подходящему ключу, без учёта регистра, пробелов и «_» */
+function pick(obj: Record<string, unknown>, aliases: string[]): unknown {
+  const norm = (k: string) => k.toLowerCase().replace(/[\s_-]/g, '')
+  const wanted = new Set(aliases.map(norm))
+  for (const [k, v] of Object.entries(obj)) if (wanted.has(norm(k))) return v
+  return undefined
+}
+
+function toBool(v: unknown): boolean | null {
+  if (typeof v === 'boolean') return v
+  if (typeof v === 'number') return v > 0
+  if (typeof v === 'string') {
+    const s = v.trim().toLowerCase()
+    if (['true', 'yes', 'да', '1'].includes(s)) return true
+    if (['false', 'no', 'нет', '0'].includes(s)) return false
+  }
+  return null
+}
+
+function toNumber(v: unknown): number | null {
+  const n = typeof v === 'string' ? Number(v.replace('%', '').replace(',', '.')) : v
+  return typeof n === 'number' && Number.isFinite(n) ? n : null
+}
+
+function toName(v: unknown): string | null {
+  if (typeof v !== 'string') return null
+  const s = v.trim()
+  return s && !['null', 'none', 'unknown', 'неизвестно'].includes(s.toLowerCase()) ? s : null
+}
+
+function parseReply(text: string): Omit<BirdAiResult, 'model' | 'inputTokens' | 'outputTokens'> {
+  const raw = extractJson(text)
+  const count = toNumber(pick(raw, ['count', 'bird_count', 'birds', 'количество']))
+  let bird = toBool(pick(raw, ['bird', 'is_bird', 'has_bird', 'bird_present', 'answer', 'есть птица', 'птица', 'ответ']))
+  if (bird === null && count !== null) bird = count > 0
+  if (bird === null) throw new Error(`model reply has no "bird": ${JSON.stringify(raw).slice(0, 200)}`)
+
+  const species = bird ? toName(pick(raw, ['species', 'species_ru', 'name', 'вид'])) : null
+  let confidence = toNumber(pick(raw, ['confidence', 'species_confidence', 'уверенность'])) ?? 0
+  if (confidence > 1) confidence /= 100
+  return {
+    bird,
+    count: bird ? Math.max(1, Math.round(count ?? 1)) : 0,
+    species,
+    latin: species ? toName(pick(raw, ['latin', 'species_latin', 'scientific_name', 'латинское название'])) : null,
+    confidence: species ? Math.min(1, Math.max(0, confidence)) : 0,
+  }
 }
 
 export async function classifyBirdPhoto(jpeg: ArrayBuffer): Promise<BirdAiResult> {
   const model = getBirdAiModel()
-  const { output, usage } = await generateText({
+  const { text, usage } = await generateText({
     model,
     // Рассуждения оплачиваются как выходные токены и в разы удорожают запрос
     reasoning: 'none',
-    maxOutputTokens: 300,
-    abortSignal: AbortSignal.timeout(60_000),
-    output: Output.object({ schema: resultSchema }),
+    maxOutputTokens: 400,
+    maxRetries: 1,
+    abortSignal: AbortSignal.timeout(45_000),
     messages: [
       {
         role: 'user',
@@ -93,13 +157,8 @@ export async function classifyBirdPhoto(jpeg: ArrayBuffer): Promise<BirdAiResult
     ],
   })
 
-  const species = output.bird ? output.species?.trim() || null : null
   return {
-    bird: output.bird,
-    count: output.bird ? Math.max(1, output.count) : 0,
-    species,
-    latin: species ? output.latin?.trim() || null : null,
-    confidence: species ? output.confidence : 0,
+    ...parseReply(text),
     model,
     inputTokens: usage.inputTokens ?? null,
     outputTokens: usage.outputTokens ?? null,

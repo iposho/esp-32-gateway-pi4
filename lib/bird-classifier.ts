@@ -23,8 +23,12 @@ const MAX_ATTEMPTS = 3
 const AUTH_PAUSE_MS = 30 * 60_000
 const RATE_PAUSE_MS = 60_000
 const DEFAULT_DAILY_LIMIT = 300
+/** Не больше стольких вызовов модели за проход: иначе при сбое модели каждый проход бьёт по всем 24 снимкам */
+const MAX_CALLS_PER_TICK = 3
 
 const attempts = new Map<string, number>()
+/** Вызовы модели за сутки, включая неудачные. Строк в БД для них может не быть */
+let calls = { day: '', count: 0 }
 let pausedUntil = 0
 /** bird_photo_id из телеметрии, для которого все снимки уже разобраны */
 let doneMotionPhotoId: number | null | undefined
@@ -65,23 +69,27 @@ async function tick(): Promise<void> {
   if (knownErr) throw new Error(knownErr.message)
 
   const done = new Set((known ?? []).map((r) => shotKey(r.photo_id, r.shot_at)))
-  // Старые первыми: если упрёмся в лимит, лента заполнится по порядку
-  const pending = shots.filter((s) => !done.has(shotKey(s.id, s.at))).reverse()
+  // Новые первыми: они важнее для ленты, а старые при сбоях всё равно уйдут из журнала камеры
+  const pending = shots.filter((s) => !done.has(shotKey(s.id, s.at)))
   if (pending.length === 0) {
     doneMotionPhotoId = motionPhotoId
     return
   }
 
-  const dayStart = startOfLocalDay()
-  const { count, error: countErr } = await supabase
-    .from('bird_detections')
-    .select('id', { count: 'exact', head: true })
-    .gte('created_at', dayStart.toISOString())
-  if (countErr) throw new Error(countErr.message)
+  const day = startOfLocalDay().toISOString()
+  if (calls.day !== day) {
+    // После рестарта за сегодня известны только записанные строки
+    const { count, error: countErr } = await supabase
+      .from('bird_detections')
+      .select('id', { count: 'exact', head: true })
+      .gte('created_at', day)
+    if (countErr) throw new Error(countErr.message)
+    calls = { day, count: count ?? 0 }
+  }
 
-  const budget = dailyLimit() - (count ?? 0)
+  const budget = Math.min(dailyLimit() - calls.count, MAX_CALLS_PER_TICK)
   if (budget <= 0) {
-    const day = dayStart.toISOString()
+    if (calls.count < dailyLimit()) return
     if (limitLoggedDay !== day) {
       limitLoggedDay = day
       console.warn(`[BirdAI] daily limit ${dailyLimit()} reached, skipping until tomorrow`)
@@ -94,7 +102,11 @@ async function tick(): Promise<void> {
     const key = shotKey(shot.id, shot.at)
     try {
       const photo = await getBirdPhoto(shot.id)
-      const r = await classifyBirdPhoto(photo.body)
+      calls.count++
+      const startedAt = Date.now()
+      const r = await classifyBirdPhoto(photo.body).catch((e: unknown) => {
+        throw Object.assign(e as Error, { elapsedMs: Date.now() - startedAt })
+      })
       await saveRow({
         photo_id: shot.id,
         shot_at: shot.at,
@@ -110,14 +122,15 @@ async function tick(): Promise<void> {
       attempts.delete(key)
       console.log(
         `[BirdAI] photo ${shot.id}: ${r.bird ? `bird ×${r.count} ${r.species ?? '?'} ${Math.round(r.confidence * 100)}%` : 'no bird'}` +
-          ` (${r.inputTokens ?? '?'}+${r.outputTokens ?? '?'} tok)`,
+          ` (${r.inputTokens ?? '?'}+${r.outputTokens ?? '?'} tok, ${Date.now() - startedAt} ms)`,
       )
     } catch (e) {
       failed = true
       if (e instanceof CameraUnavailableError) return
 
       const status = errorStatus(e)
-      const message = (e as Error).message
+      const elapsed = (e as { elapsedMs?: number }).elapsedMs
+      const message = (e as Error).message + (elapsed === undefined ? '' : ` [${elapsed} ms]`)
       if (status === 401 || status === 402 || status === 403) {
         pausedUntil = Date.now() + AUTH_PAUSE_MS
         console.error(`[BirdAI] gateway refused (${status}), pausing 30 min: ${message}`)
