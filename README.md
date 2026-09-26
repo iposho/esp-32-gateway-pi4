@@ -97,6 +97,7 @@ flowchart LR
    ```
 
    Для распознавания птиц на кормушке — `scripts/011_bird_detections.sql`
+   и `scripts/012_bird_detections_cost.sql`
    (см. `docs/birdfeeder.md`).
 
 2. **Узнать имя docker-сети** Supabase-стека:
@@ -591,7 +592,7 @@ docker exec supabase-db df -h /dev/shm   # должно быть 1.0G
 app/                     # Next.js: страницы, API-роуты (auth, devices, command)
 components/              # UI и дашборд
 lib/                     # supabase-клиент, auth (HMAC-cookie), mqtt-паблишер
-scripts/                 # SQL-миграции 001–011 (схема, retention, обслуживание, кормушка)
+scripts/                 # SQL-миграции 001–012 (схема, retention, обслуживание, кормушка)
 mosquitto/config/        # конфиг + ACL брокера
 node-red/                # пример flow (развёрнутый node-red/data/ — вне git)
 scripts/fix-nodered-status-rpc.py  # перевод статуса/touch в развёрнутом flow на RPC (как в example)

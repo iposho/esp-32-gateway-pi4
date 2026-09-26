@@ -1,5 +1,5 @@
 import { getServiceClient } from '@/lib/supabase/server'
-import { classifyBirdPhoto, getBirdAiModel, isBirdAiEnabled } from '@/lib/bird-ai'
+import { type BirdAiCostError, classifyBirdPhoto, getBirdAiModel, isBirdAiEnabled } from '@/lib/bird-ai'
 import {
   CameraUnavailableError,
   getBirdfeederDeviceId,
@@ -27,14 +27,34 @@ const DEFAULT_DAILY_LIMIT = 300
 const MAX_CALLS_PER_TICK = 3
 
 const attempts = new Map<string, number>()
+/** Цена неудачных попыток снимка: войдёт в cost_usd его итоговой строки */
+const failedCost = new Map<string, number>()
 /** Вызовы модели за сутки, включая неудачные. Строк в БД для них может не быть */
 let calls = { day: '', count: 0 }
+/** Расход этого процесса за сутки, USD (после рестарта — с нуля; точный — отчёт Gateway) */
+let spent = { day: '', usd: 0 }
+let costColumnMissing = false
+
+/** Для /usage: вызовы модели и расход с начала суток по счётчику процесса */
+export function getBirdAiCallsToday(): { calls: number; spentUsd: number } {
+  const day = startOfLocalDay().toISOString()
+  return {
+    calls: calls.day === day ? calls.count : 0,
+    spentUsd: spent.day === day ? spent.usd : 0,
+  }
+}
+
+function addSpent(day: string, usd: number | null | undefined): void {
+  if (!usd) return
+  if (spent.day !== day) spent = { day, usd: 0 }
+  spent.usd += usd
+}
 let pausedUntil = 0
 /** bird_photo_id из телеметрии, для которого все снимки уже разобраны */
 let doneMotionPhotoId: number | null | undefined
 let limitLoggedDay = ''
 
-function dailyLimit(): number {
+export function dailyLimit(): number {
   const n = Number(process.env.BIRD_AI_DAILY_LIMIT)
   return Number.isFinite(n) && n >= 0 ? n : DEFAULT_DAILY_LIMIT
 }
@@ -107,6 +127,9 @@ async function tick(): Promise<void> {
       const r = await classifyBirdPhoto(photo.body).catch((e: unknown) => {
         throw Object.assign(e as Error, { elapsedMs: Date.now() - startedAt })
       })
+      addSpent(day, r.costUsd)
+      const prevCost = failedCost.get(key) ?? 0
+      failedCost.delete(key)
       await saveRow({
         photo_id: shot.id,
         shot_at: shot.at,
@@ -118,15 +141,20 @@ async function tick(): Promise<void> {
         model: r.model,
         input_tokens: r.inputTokens,
         output_tokens: r.outputTokens,
+        cost_usd: r.costUsd === null && prevCost === 0 ? null : (r.costUsd ?? 0) + prevCost,
       })
       attempts.delete(key)
       console.log(
         `[BirdAI] photo ${shot.id}: ${r.bird ? `bird ×${r.count} ${r.species ?? '?'} ${Math.round(r.confidence * 100)}%` : 'no bird'}` +
-          ` (${r.inputTokens ?? '?'}+${r.outputTokens ?? '?'} tok, ${Date.now() - startedAt} ms)`,
+          ` (${r.inputTokens ?? '?'}+${r.outputTokens ?? '?'} tok, ${formatUsd(r.costUsd)}, ${Date.now() - startedAt} ms)`,
       )
     } catch (e) {
       failed = true
       if (e instanceof CameraUnavailableError) return
+
+      const cost = (e as BirdAiCostError).costUsd
+      addSpent(day, cost)
+      if (cost) failedCost.set(key, (failedCost.get(key) ?? 0) + cost)
 
       const status = errorStatus(e)
       const elapsed = (e as { elapsedMs?: number }).elapsedMs
@@ -149,11 +177,14 @@ async function tick(): Promise<void> {
         continue
       }
       attempts.delete(key)
+      const total = failedCost.get(key)
+      failedCost.delete(key)
       await saveRow({
         photo_id: shot.id,
         shot_at: shot.at,
         is_bird: null,
         model: getBirdAiModel(),
+        cost_usd: total ?? null,
         error: message.slice(0, 500),
       })
     }
@@ -162,13 +193,27 @@ async function tick(): Promise<void> {
   if (!failed && pending.length <= budget) doneMotionPhotoId = motionPhotoId
 }
 
+function formatUsd(usd: number | null): string {
+  return usd === null ? '$?' : `$${usd.toFixed(6)}`
+}
+
 async function saveRow(row: Record<string, unknown>): Promise<void> {
-  const { error } = await getServiceClient()
-    .from('bird_detections')
-    .upsert(
-      { device_id: getBirdfeederDeviceId(), ...row },
-      { onConflict: 'device_id,photo_id,shot_at', ignoreDuplicates: true },
-    )
+  const upsert = (r: Record<string, unknown>) =>
+    getServiceClient()
+      .from('bird_detections')
+      .upsert(
+        { device_id: getBirdfeederDeviceId(), ...r },
+        { onConflict: 'device_id,photo_id,shot_at', ignoreDuplicates: true },
+      )
+
+  // Колонка cost_usd появляется в scripts/012; без неё пишем строку без цены
+  const { cost_usd: _cost, ...withoutCost } = row
+  let { error } = await upsert(costColumnMissing ? withoutCost : row)
+  if (error && !costColumnMissing && error.message.includes('cost_usd')) {
+    costColumnMissing = true
+    console.warn('[BirdAI] no bird_detections.cost_usd — apply scripts/012_bird_detections_cost.sql')
+    ;({ error } = await upsert(withoutCost))
+  }
   if (error) throw new Error(`save detection: ${error.message}`)
 }
 

@@ -31,6 +31,7 @@ import {
 import { CommandsReference } from "./commands-reference";
 import { PinManagerModal } from "./pin-manager-modal";
 import { FileManagerModal } from "./file-manager-modal";
+import { BirdAiUsageSection } from "./bird-ai-usage";
 import {
   getDetailMetricGroups,
   getDeviceIp,
@@ -123,6 +124,9 @@ export function DeviceDetailView({
             onCommand={onCommand}
           />
         )}
+
+        {/* Камера кормушки: её телеметрия несёт счётчик визитов */}
+        {"bird_visits_today" in payload && <BirdAiUsageSection />}
 
         {metricGroups.length > 0 && (
           <Section title="Показания">

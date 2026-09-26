@@ -25,7 +25,7 @@ esp32-bird-cam (LAN)                         Pi: esp32-admin                    
 
 ## Эндпоинты шлюза
 
-Все четыре — под тем же `CAMERA_API_TOKEN`, что и `/api/camera/latest`
+Все — под тем же `CAMERA_API_TOKEN`, что и `/api/camera/latest`
 (`Authorization: Bearer …` или `?token=`), CORS открыт.
 
 | Метод | Путь | Ответ |
@@ -34,6 +34,7 @@ esp32-bird-cam (LAN)                         Pi: esp32-admin                    
 | GET | `/api/camera/birdfeeder/frame` | JPEG — живой кадр (кэш 1 с, 503 если камера офлайн) |
 | GET | `/api/camera/birdfeeder/bird?id=N` | JPEG — снимок с птицей с SD (без `id` — последний) |
 | GET | `/api/camera/birdfeeder/birds` | JSON `{ shots: [{ id, at, bird, count, species, latin, confidence }] }` — последние снимки (до 24, новые первыми; кэш 10 с). Снимки, где нейронка не нашла птицу, убраны; `bird: null` — ещё не проверен |
+| GET | `/api/camera/birdfeeder/usage` | JSON — расход модели в USD: `balanceUsd`, `today { calls, spentUsd }`, `days[]`, `last7Usd`, `last30Usd`, `avgPhotoUsd`, `daysLeft` (раздел «Расход в долларах») |
 
 ## Переменные `.env`
 
@@ -104,9 +105,28 @@ admin, раз в 15 с (lib/bird-classifier.ts):
 - **Без ключа** или с `BIRD_AI_DISABLED=1` всё работает как раньше: считает детектор камеры.
   Если таблицы `bird_detections` нет, статус тоже откатывается на детектор (в логе предупреждение).
 
+### Расход в долларах
+
+Каждый запрос уходит в Gateway с тегом `birdfeeder`. Сводку отдаёт
+`/api/camera/birdfeeder/usage`, её же показывает карточка «Распознавание птиц» на
+странице камеры в админке.
+
+| Поле | Откуда | Что значит |
+|------|--------|-----------|
+| `balanceUsd`, `totalUsedUsd` | `gateway.getCredits()` | остаток и расход кредитов **всей команды** Vercel |
+| `days[]`, `last7Usd`, `last30Usd`, `requests30` | отчёт Gateway по тегу `birdfeeder` | все вызовы кормушки, включая неудачные; дни в UTC, данные приходят с задержкой в несколько минут |
+| `today { calls, spentUsd }` | счётчик процесса `admin` | сутки по `BIRDFEEDER_TZ`; после рестарта контейнера считается с нуля |
+| `avgPhotoUsd` | `bird_detections.cost_usd` | средняя цена снимка по последним 200, с неудачными попытками |
+| `daysLeft` | `balanceUsd / (last7Usd / 7)` | на сколько дней хватит остатка |
+
+Цена вызова берётся из ответа Gateway, а если её там нет — считается по токенам и прайсу
+из `/v1/models`. Цена пишется в лог (`photo N: … (1234+40 tok, $0.000184, 2100 ms)`)
+и в `bird_detections.cost_usd`: для колонки нужен `scripts/012_bird_detections_cost.sql`.
+Без него строки пишутся без цены, в логе будет предупреждение.
+
 Включение:
 
-1. `scripts/011_bird_detections.sql` в Supabase.
+1. `scripts/011_bird_detections.sql` и `scripts/012_bird_detections_cost.sql` в Supabase.
 2. В `.env` на Pi: `AI_GATEWAY_API_KEY=…` (vercel.com → AI Gateway → API Keys),
    по желанию `BIRD_AI_MODEL`, `BIRD_AI_DAILY_LIMIT`, `BIRDFEEDER_REGION`, `BIRDFEEDER_TZ`.
 3. `docker compose up -d --build admin`, в логе: `[BirdAI] started, model …`.

@@ -1,4 +1,4 @@
-import { generateText } from 'ai'
+import { generateText, type LanguageModelUsage, type ProviderMetadata } from 'ai'
 
 /**
  * Распознавание птиц на снимке с кормушки через Vercel AI Gateway.
@@ -8,6 +8,10 @@ import { generateText } from 'ai'
 
 const DEFAULT_MODEL = 'xiaomi/mimo-v2.6-flash'
 const DEFAULT_REGION = 'Ереван, Армения'
+/** Тег запросов в AI Gateway: по нему строится отчёт о расходах кормушки */
+export const BIRD_AI_TAG = 'birdfeeder'
+const MODELS_URL = 'https://ai-gateway.vercel.sh/v1/models'
+const PRICING_TTL_MS = 24 * 60 * 60_000
 
 /** Частые гости кормушек в Армении — подсказка модели, а не жёсткий список */
 const REGION_SPECIES = [
@@ -49,7 +53,12 @@ export type BirdAiResult = {
   model: string
   inputTokens: number | null
   outputTokens: number | null
+  /** Цена вызова в USD: из ответа Gateway, иначе по токенам и прайсу модели */
+  costUsd: number | null
 }
+
+/** Ошибка после ответа модели: токены уже оплачены */
+export type BirdAiCostError = Error & { costUsd?: number | null }
 
 /*
  * Output.object здесь не годится: mimo-v2.6-flash заявлен со structured output,
@@ -118,7 +127,9 @@ function toName(v: unknown): string | null {
   return s && !['null', 'none', 'unknown', 'неизвестно'].includes(s.toLowerCase()) ? s : null
 }
 
-function parseReply(text: string): Omit<BirdAiResult, 'model' | 'inputTokens' | 'outputTokens'> {
+function parseReply(
+  text: string,
+): Omit<BirdAiResult, 'model' | 'inputTokens' | 'outputTokens' | 'costUsd'> {
   const raw = extractJson(text)
   const count = toNumber(pick(raw, ['count', 'bird_count', 'birds', 'количество']))
   let bird = toBool(pick(raw, ['bird', 'is_bird', 'has_bird', 'bird_present', 'answer', 'есть птица', 'птица', 'ответ']))
@@ -137,15 +148,52 @@ function parseReply(text: string): Omit<BirdAiResult, 'model' | 'inputTokens' | 
   }
 }
 
+let pricing: { at: number; byModel: Map<string, { input: number; output: number }> } | null = null
+
+/** Прайс моделей Gateway (USD за токен), раз в сутки */
+async function modelPrice(model: string): Promise<{ input: number; output: number } | null> {
+  if (!pricing || Date.now() - pricing.at > PRICING_TTL_MS) {
+    try {
+      const res = await fetch(MODELS_URL, { signal: AbortSignal.timeout(10_000) })
+      const body = (await res.json()) as {
+        data?: Array<{ id: string; pricing?: { input?: string; output?: string } }>
+      }
+      const byModel = new Map<string, { input: number; output: number }>()
+      for (const m of body.data ?? []) {
+        const input = Number(m.pricing?.input)
+        const output = Number(m.pricing?.output)
+        if (Number.isFinite(input) && Number.isFinite(output)) byModel.set(m.id, { input, output })
+      }
+      pricing = { at: Date.now(), byModel }
+    } catch {
+      return pricing?.byModel.get(model) ?? null
+    }
+  }
+  return pricing.byModel.get(model) ?? null
+}
+
+async function callCost(
+  model: string,
+  usage: LanguageModelUsage,
+  metadata: ProviderMetadata | undefined,
+): Promise<number | null> {
+  const reported = Number(metadata?.gateway?.cost)
+  if (metadata?.gateway?.cost != null && Number.isFinite(reported)) return reported
+  const price = await modelPrice(model)
+  if (!price || usage.inputTokens === undefined) return null
+  return usage.inputTokens * price.input + (usage.outputTokens ?? 0) * price.output
+}
+
 export async function classifyBirdPhoto(jpeg: ArrayBuffer): Promise<BirdAiResult> {
   const model = getBirdAiModel()
-  const { text, usage } = await generateText({
+  const { text, usage, providerMetadata } = await generateText({
     model,
     // Рассуждения оплачиваются как выходные токены и в разы удорожают запрос
     reasoning: 'none',
     maxOutputTokens: 400,
     maxRetries: 1,
     abortSignal: AbortSignal.timeout(45_000),
+    providerOptions: { gateway: { tags: [BIRD_AI_TAG] } },
     messages: [
       {
         role: 'user',
@@ -157,10 +205,18 @@ export async function classifyBirdPhoto(jpeg: ArrayBuffer): Promise<BirdAiResult
     ],
   })
 
+  const costUsd = await callCost(model, usage, providerMetadata)
+  let reply: ReturnType<typeof parseReply>
+  try {
+    reply = parseReply(text)
+  } catch (e) {
+    throw Object.assign(e as Error, { costUsd })
+  }
   return {
-    ...parseReply(text),
+    ...reply,
     model,
     inputTokens: usage.inputTokens ?? null,
     outputTokens: usage.outputTokens ?? null,
+    costUsd,
   }
 }
