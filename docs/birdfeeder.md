@@ -1,9 +1,14 @@
 # Кормушка: ESP32-CAM → шлюз → kuzyak.in
 
 Камера у кормушки сама делает кадр раз в секунду, ищет движение (без нейронки)
-и сохраняет снимки с птицами на SD. Шлюз **ничего не считает и не хранит** —
-только кэширует ответы камеры в памяти процесса `admin`, чтобы любое число
-зрителей сайта давало ESP32 не больше одного запроса в секунду.
+и сохраняет снимки с движением на SD. Шлюз кэширует ответы камеры в памяти
+процесса `admin`, чтобы любое число зрителей сайта давало ESP32 не больше одного
+запроса в секунду.
+
+Если задан `AI_GATEWAY_API_KEY`, шлюз отправляет каждый новый снимок в модель
+через Vercel AI Gateway и пишет ответ в `bird_detections`. Тогда визиты, последний
+снимок и лента считаются только по подтверждённым птицам, а у снимков есть вид
+(раздел «Распознавание птиц»).
 
 ```
 esp32-bird-cam (LAN)                         Pi: esp32-admin                     kuzyak.in (Vercel)
@@ -25,10 +30,10 @@ esp32-bird-cam (LAN)                         Pi: esp32-admin                    
 
 | Метод | Путь | Ответ |
 |-------|------|-------|
-| GET | `/api/camera/birdfeeder` | JSON `{ online, daylight, motion, birdLastAt, visitsToday, birdPhotoId, updatedAt }` |
+| GET | `/api/camera/birdfeeder` | JSON `{ online, daylight, motion, birdLastAt, visitsToday, birdPhotoId, updatedAt, ai, motionVisitsToday, species, speciesToday }` |
 | GET | `/api/camera/birdfeeder/frame` | JPEG — живой кадр (кэш 1 с, 503 если камера офлайн) |
 | GET | `/api/camera/birdfeeder/bird?id=N` | JPEG — снимок с птицей с SD (без `id` — последний) |
-| GET | `/api/camera/birdfeeder/birds` | JSON `{ shots: [{ id, at }] }` — последние снимки с птицами (до 24, новые первыми; кэш 10 с) |
+| GET | `/api/camera/birdfeeder/birds` | JSON `{ shots: [{ id, at, bird, count, species, latin, confidence }] }` — последние снимки (до 24, новые первыми; кэш 10 с). Снимки, где нейронка не нашла птицу, убраны; `bird: null` — ещё не проверен |
 
 ## Переменные `.env`
 
@@ -41,8 +46,8 @@ BIRDFEEDER_DEVICE_ID=esp32-bird-cam
 
 ## Развёртывание
 
-1. **Прошивка камеры ≥ 1.2.0** (репозиторий `arduino`, скетч `esp32_cam`):
-   `./scripts/build-ota.sh cam` → OTA из дашборда шлюза. Раздел — только `min_spiffs`.
+1. **Прошивка камеры ≥ 1.2.0**, для распознавания птиц — ≥ 1.3.0 (снимки XGA) (репозиторий `arduino`, скетч `esp32_bird_cam`):
+   `./scripts/build-ota.sh birdcam` → OTA из дашборда шлюза. Раздел — только `min_spiffs`.
 2. **Шлюз на Pi:**
    ```bash
    cd ~/esp32-gateway-pi4        # путь к репозиторию на Pi
@@ -67,6 +72,50 @@ BIRDFEEDER_DEVICE_ID=esp32-bird-cam
    `system_settings.birdfeeder_widget` + обновлённая функция `get_public_system_settings`),
    затем в админке сайта «Виджеты → Кормушка» вписать `CAMERA_API_TOKEN` и включить.
 
+## Распознавание птиц
+
+Прошивка ловит только движение: ветки, тени и смену света она не отличает от птицы.
+Поэтому решение «птица или нет» и вид принимает модель на шлюзе.
+
+```
+камера: движение → снимок на SD (XGA 1024×768, прошивка ≥ 1.3.0) → bird_photo_id в телеметрии
+admin, раз в 15 с (lib/bird-classifier.ts):
+  bird_photo_id сменился → /birds.json → новые снимки → JPEG → модель (AI Gateway)
+  → bird_detections(is_bird, bird_count, species, species_latin, confidence, токены)
+статус и лента → только is_bird = true
+```
+
+- **Визит** — серия снимков с птицами без пауз дольше 60 с (как `BIRD_VISIT_GAP_MS`
+  в прошивке). Вид визита — самый уверенный ответ модели среди его снимков.
+  «Сегодня» считается по `BIRDFEEDER_TZ` (по умолчанию `Asia/Yerevan`).
+- **Модель** — `BIRD_AI_MODEL`, по умолчанию `xiaomi/mimo-v2.6-flash`: самая дешёвая
+  модель с тегом `vision` на Gateway. Рассуждения выключены (`reasoning: 'none'`), иначе
+  они оплачиваются как выходные токены.
+- **Стоимость:** около $0.0002–0.0003 за снимок, то есть $4 хватает на 15–20 тыс. снимков.
+  Токены каждого запроса пишутся в `bird_detections.input_tokens/output_tokens`.
+- **Защита кредитов:** не больше `BIRD_AI_DAILY_LIMIT` запросов в сутки (по умолчанию 300).
+  После отказа Gateway по ключу или кредитам (401/402/403) цикл ждёт 30 мин,
+  после 429 — 1 мин. Снимок, на котором модель трижды упала, записывается с `error`
+  и больше не отправляется.
+- **Без ключа** или с `BIRD_AI_DISABLED=1` всё работает как раньше: считает детектор камеры.
+  Если таблицы `bird_detections` нет, статус тоже откатывается на детектор (в логе предупреждение).
+
+Включение:
+
+1. `scripts/011_bird_detections.sql` в Supabase.
+2. В `.env` на Pi: `AI_GATEWAY_API_KEY=…` (vercel.com → AI Gateway → API Keys),
+   по желанию `BIRD_AI_MODEL`, `BIRD_AI_DAILY_LIMIT`, `BIRDFEEDER_REGION`, `BIRDFEEDER_TZ`.
+3. `docker compose up -d --build admin`, в логе: `[BirdAI] started, model …`.
+4. После следующего визита: `docker logs esp32-admin | grep BirdAI` — строки
+   `photo N: bird ×1 Большая синица 87% (… tok)` или `no bird`.
+
+Что проверить по первым ответам:
+
+```sql
+select shot_at, is_bird, species, confidence, input_tokens, output_tokens, error
+  from bird_detections order by shot_at desc limit 20;
+```
+
 ## Калибровка детектора
 
 Страница камеры `http://esp32-bird-cam.local/` показывает «Яркость», «Движение ‰»
@@ -80,7 +129,8 @@ BIRDFEEDER_DEVICE_ID=esp32-bird-cam
 - срабатывает на людей, руки, сдвинутую камеру → опустить `MOTION_MAX_BIRD_PERMILLE`
   (200 = 20% зоны; больше — не птица).
 
-Детектор реагирует на движение и не распознаёт птиц. До прошивки 1.2.4 он читал RGB565
+Детектор реагирует на движение и не распознаёт птиц: это делает шлюз (см. выше), поэтому
+порог можно держать чувствительным — ложные снимки отсеет модель. До прошивки 1.2.4 он читал RGB565
 не в том порядке байт, видел ~100‰ «изменений» на неподвижной сцене и писал ложный
 визит каждые 10 с.
 
