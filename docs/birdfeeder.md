@@ -8,7 +8,7 @@
 ```
 esp32-bird-cam (LAN)                         Pi: esp32-admin                     kuzyak.in (Vercel)
  ├ /latest.jpg  кадр из RAM, 1 fps ───▶ /api/camera/birdfeeder/frame  1 с ─▶ /api/birdfeeder/frame/?b=<окно 2 с>  CDN s-maxage=10
- ├ /photo?id=N  снимок птицы с SD ───▶ /api/camera/birdfeeder/bird   10 мин ▶ /api/birdfeeder/bird/?id=N        CDN 1 ч
+ ├ /photo?id=N  снимок птицы с SD ───▶ /api/camera/birdfeeder/bird   10 мин ▶ /api/birdfeeder/bird/?id=N        CDN 60 с
  ├ /birds.json  журнал снимков ────▶ /api/camera/birdfeeder/birds 10 с ─▶ /api/birdfeeder/birds/              CDN 15 с
  └ MQTT telemetry: bird_last_at, ──▶ Node-RED → Supabase ─▶ /api/camera/birdfeeder 5 с ▶ /api/birdfeeder/  CDN 5 с
    bird_visits_today, daylight,
