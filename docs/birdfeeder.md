@@ -34,6 +34,7 @@ esp32-bird-cam (LAN)                         Pi: esp32-admin                    
 | GET | `/api/camera/birdfeeder/frame` | JPEG — живой кадр (кэш 1 с, 503 если камера офлайн) |
 | GET | `/api/camera/birdfeeder/bird?id=N` | JPEG — снимок с птицей с SD (без `id` — последний) |
 | GET | `/api/camera/birdfeeder/birds` | JSON `{ shots: [{ id, at, bird, count, species, latin, confidence }] }` — последние снимки (до 24, новые первыми; кэш 10 с). Снимки, где нейронка не нашла птицу, убраны; `bird: null` — ещё не проверен |
+| GET | `/api/camera/birdfeeder/stats` | JSON — статистика по подтверждённым птицам: `totalVisits`, `recentVisits` (30 дней), `species[{ species, latin, visits, recentVisits, firstSeenAt, lastSeenAt }]`, `byHour[24]` и `byDay[{ date, visits }]` за 30 дней (время `BIRDFEEDER_TZ`), `records{ busiestDay, earliest, latest, mostBirds }`. Кэш 5 мин |
 | GET | `/api/camera/birdfeeder/usage` | JSON — расход модели в USD: `balanceUsd`, `today { calls, spentUsd }`, `days[]`, `last7Usd`, `last30Usd`, `avgPhotoUsd`, `daysLeft` (раздел «Расход в долларах») |
 
 ## Переменные `.env`

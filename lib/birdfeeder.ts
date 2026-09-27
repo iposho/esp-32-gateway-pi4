@@ -26,8 +26,13 @@ const CAMERA_TIMEOUT_MS = 5_000
 /** Сколько последних строк телеметрии смотреть: OTA/fs-события идут без полей камеры */
 const TELEMETRY_LOOKBACK = 5
 /** Как BIRD_VISIT_GAP_MS в прошивке: тишина дольше — следующий визит новый */
-const BIRD_VISIT_GAP_MS = 60_000
+export const BIRD_VISIT_GAP_MS = 60_000
 const DEFAULT_TZ = 'Asia/Yerevan'
+
+/** Часовой пояс кормушки: «сегодня», часы и дни в статистике */
+export function getBirdfeederTimeZone(): string {
+  return process.env.BIRDFEEDER_TZ || DEFAULT_TZ
+}
 
 export type BirdfeederStatus = {
   online: boolean
@@ -76,7 +81,7 @@ export function shotKey(photoId: number, at: string): string {
 
 /** Начало текущих суток в часовом поясе кормушки (BIRDFEEDER_TZ) */
 export function startOfLocalDay(now = new Date()): Date {
-  const timeZone = process.env.BIRDFEEDER_TZ || DEFAULT_TZ
+  const timeZone = getBirdfeederTimeZone()
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat('en-US', {
       timeZone,
@@ -275,18 +280,22 @@ function enqueueCamera<T>(task: () => Promise<T>): Promise<T> {
 function fetchCamera(url: string, accept: string): Promise<Response> {
   return enqueueCamera(async () => {
     let res: Response
+    let body: ArrayBuffer
     try {
       res = await fetch(url, {
         cache: 'no-store',
         signal: AbortSignal.timeout(CAMERA_TIMEOUT_MS),
         headers: { Accept: accept },
       })
+      if (!res.ok) throw new CameraUnavailableError(`camera responded ${res.status}`)
+      // Тело читаем внутри очереди: пока оно не дочитано, камера занята.
+      // Таймаут на чтении тела — тоже «камера недоступна», а не сбой распознавания.
+      body = await res.arrayBuffer()
     } catch (e) {
+      if (e instanceof CameraUnavailableError) throw e
       throw new CameraUnavailableError(`camera fetch failed: ${(e as Error).message}`)
     }
-    if (!res.ok) throw new CameraUnavailableError(`camera responded ${res.status}`)
-    // Тело читаем внутри очереди: пока оно не дочитано, камера занята
-    return new Response(await res.arrayBuffer(), { headers: res.headers })
+    return new Response(body, { headers: res.headers })
   })
 }
 
