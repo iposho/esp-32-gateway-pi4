@@ -129,7 +129,15 @@ admin, раз в 15 с (lib/bird-classifier.ts):
 | `days[]`, `last7Usd`, `last30Usd`, `requests30` | отчёт Gateway по тегу `birdfeeder` | все вызовы кормушки, включая неудачные; дни в UTC, данные приходят с задержкой в несколько минут |
 | `today { calls, spentUsd }` | счётчик процесса `admin` | сутки по `BIRDFEEDER_TZ`; после рестарта контейнера считается с нуля |
 | `avgPhotoUsd` | `bird_detections.cost_usd` | средняя цена снимка по последним 200, с неудачными попытками |
-| `daysLeft` | `balanceUsd / (last7Usd / 7)` | на сколько дней хватит остатка |
+| `budget { amountUsd, setAt, spentSinceUsd, remainingUsd }` | `bird_ai_budget` (scripts/013) | остаток кормушки, вписанный вручную: сумма на момент `setAt` минус `cost_usd` с тех пор |
+| `daysLeft` | остаток ÷ средний дневной расход за 7 дней | на сколько дней хватит `budget.remainingUsd`, а если он не вписан — кредитов команды |
+
+**Остаток редактируется в карточке** (карандаш на плитке «Остаток»): Gateway знает только
+кредиты всей команды Vercel, поэтому сумму, выделенную на кормушку, вписываете вы. Сохраняет
+`PUT /api/birdfeeder/budget { amountUsd }` — путь вне `/api/camera`, только для входа в админку,
+`CAMERA_API_TOKEN` сайта туда не пускает. `amountUsd: null` — вернуться к кредитам команды.
+Расход с момента записи берётся из `cost_usd`: вызовы без строки (упавшие до третьей попытки)
+в него не попадают, а цена по прайсу бывает выше реальной — остаток скорее занижен.
 
 Цена вызова берётся из ответа Gateway, а если её там нет — считается по токенам и прайсу
 из `/v1/models`. Цена пишется в лог (`photo N: … (1234+40 tok, $0.000184, 2100 ms)`)
@@ -138,7 +146,7 @@ admin, раз в 15 с (lib/bird-classifier.ts):
 
 Включение:
 
-1. `scripts/011_bird_detections.sql` и `scripts/012_bird_detections_cost.sql` в Supabase.
+1. `scripts/011_bird_detections.sql`, `012_bird_detections_cost.sql` и `013_bird_ai_budget.sql` в Supabase.
 2. В `.env` на Pi: `AI_GATEWAY_API_KEY=…` (vercel.com → AI Gateway → API Keys),
    по желанию `BIRD_AI_MODEL`, `BIRD_AI_DAILY_LIMIT`, `BIRDFEEDER_REGION`, `BIRDFEEDER_TZ`.
 3. `docker compose up -d --build admin`, в логе: `[BirdAI] started, model …`.

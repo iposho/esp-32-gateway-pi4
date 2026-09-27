@@ -9,7 +9,9 @@ import { getBirdfeederDeviceId } from '@/lib/birdfeeder'
  * - остаток и общий расход кредитов команды — gateway.getCredits();
  * - расход по дням именно кормушки (все вызовы, включая неудачные) —
  *   отчёт Gateway по тегу birdfeeder; дни в UTC, данные приходят с задержкой;
- * - средняя цена снимка — bird_detections.cost_usd (scripts/012).
+ * - средняя цена снимка — bird_detections.cost_usd (scripts/012);
+ * - остаток кормушки — сумма, вписанная в дашборде (scripts/013), минус
+ *   cost_usd с момента, когда её вписали.
  */
 
 const REPORT_DAYS = 30
@@ -32,7 +34,9 @@ export type BirdAiUsage = {
   requests30: number | null
   /** Средняя цена одного снимка (с неудачными попытками) по последним 200 */
   avgPhotoUsd: number | null
-  /** На сколько дней хватит остатка при среднем дневном расходе последних 7 дней */
+  /** Остаток, вписанный вручную: amountUsd на момент setAt минус расход с тех пор */
+  budget: { amountUsd: number; setAt: string; spentSinceUsd: number; remainingUsd: number } | null
+  /** На сколько дней хватит остатка (budget, иначе кредитов команды) при расходе последних 7 дней */
   daysLeft: number | null
   errors: string[]
 }
@@ -89,6 +93,42 @@ function getGatewayPart(): Promise<GatewayPart> {
   return gatewayCache.value
 }
 
+async function loadBudget(): Promise<BirdAiUsage['budget']> {
+  const supabase = getServiceClient()
+  const { data, error } = await supabase
+    .from('bird_ai_budget')
+    .select('amount_usd, set_at')
+    .eq('id', 1)
+    .abortSignal(AbortSignal.timeout(DB_TIMEOUT_MS))
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  if (!data) return null
+
+  const { data: spent, error: spentErr } = await supabase
+    .rpc('bird_ai_spent_since', { since: data.set_at })
+    .abortSignal(AbortSignal.timeout(DB_TIMEOUT_MS))
+  if (spentErr) throw new Error(spentErr.message)
+
+  const amountUsd = Number(data.amount_usd)
+  const spentSinceUsd = Number(spent) || 0
+  return {
+    amountUsd,
+    setAt: new Date(data.set_at).toISOString(),
+    spentSinceUsd,
+    remainingUsd: Math.max(0, amountUsd - spentSinceUsd),
+  }
+}
+
+/** Вписать остаток вручную; null — забыть и показывать кредиты команды */
+export async function setBirdAiBudget(amountUsd: number | null): Promise<void> {
+  const table = getServiceClient().from('bird_ai_budget')
+  const { error } =
+    amountUsd === null
+      ? await table.delete().eq('id', 1)
+      : await table.upsert({ id: 1, amount_usd: amountUsd, set_at: new Date().toISOString() })
+  if (error) throw new Error(error.message)
+}
+
 async function avgPhotoUsd(): Promise<number | null> {
   const { data, error } = await getServiceClient()
     .from('bird_detections')
@@ -120,17 +160,21 @@ export async function getBirdAiUsage(): Promise<BirdAiUsage> {
       last30Usd: null,
       requests30: null,
       avgPhotoUsd: null,
+      budget: null,
       daysLeft: null,
       errors: [],
     }
   }
 
-  const [gw, avg] = await Promise.all([
+  const [gw, avg, budget] = await Promise.all([
     getGatewayPart(),
     avgPhotoUsd().catch((e: Error) => e),
+    loadBudget().catch((e: Error) => e),
   ])
   const errors = [...gw.errors]
   if (avg instanceof Error) errors.push(`db: ${avg.message}`)
+  if (budget instanceof Error) errors.push(`budget (scripts/013?): ${budget.message}`)
+  const ownBudget = budget instanceof Error ? null : budget
 
   const reportOk = !gw.errors.some((e) => e.startsWith('spend report'))
   const since7 = utcDate(-6)
@@ -152,7 +196,11 @@ export async function getBirdAiUsage(): Promise<BirdAiUsage> {
     last30Usd,
     requests30,
     avgPhotoUsd: avg instanceof Error ? null : avg,
-    daysLeft: gw.balanceUsd !== null && perDay ? Math.floor(gw.balanceUsd / perDay) : null,
+    budget: ownBudget,
+    daysLeft: (() => {
+      const left = ownBudget?.remainingUsd ?? gw.balanceUsd
+      return left !== null && perDay ? Math.floor(left / perDay) : null
+    })(),
     errors,
   }
 }
