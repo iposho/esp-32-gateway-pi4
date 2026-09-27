@@ -49,7 +49,7 @@ BIRDFEEDER_DEVICE_ID=esp32-bird-cam
 
 ## Развёртывание
 
-1. **Прошивка камеры ≥ 1.2.0**, для распознавания птиц — ≥ 1.3.0 (снимки XGA) (репозиторий `arduino`, скетч `esp32_bird_cam`):
+1. **Прошивка камеры ≥ 1.2.0**, для настройки цвета — ≥ 1.3.3 (репозиторий `arduino`, скетч `esp32_bird_cam`):
    `./scripts/build-ota.sh birdcam` → OTA из дашборда шлюза. Раздел — только `min_spiffs`.
 2. **Шлюз на Pi:**
    ```bash
@@ -81,7 +81,7 @@ BIRDFEEDER_DEVICE_ID=esp32-bird-cam
 Поэтому решение «птица или нет» и вид принимает модель на шлюзе.
 
 ```
-камера: движение → снимок на SD (XGA 1024×768, прошивка ≥ 1.3.0) → bird_photo_id в телеметрии
+камера: движение → снимок на SD (SVGA 800×600; OV3660 на AI-Thinker — RGB565 VGA 640×480) → bird_photo_id в телеметрии
 admin, раз в 15 с (lib/bird-classifier.ts):
   bird_photo_id сменился → /birds.json → новые снимки → JPEG → модель (AI Gateway)
   → bird_detections(is_bird, bird_count, species, species_latin, confidence, токены)
