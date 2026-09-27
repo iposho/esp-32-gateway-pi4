@@ -5,9 +5,9 @@ import {
   getBirdAiMinLuma,
   getBirdAiModel,
   isBirdAiEnabled,
-  isNightShot,
   photoLuma,
 } from '@/lib/bird-ai'
+import { isAsleep } from '@/lib/bird-schedule'
 import {
   CameraUnavailableError,
   getBirdfeederDeviceId,
@@ -145,8 +145,8 @@ async function tick(): Promise<void> {
   for (const shot of pending.slice(0, budget)) {
     const key = shotKey(shot.id, shot.at)
     try {
-      // Ночь по солнцу: снимок даже не забираем с камеры
-      if (isNightShot(shot.at)) {
+      // Вне часов работы (расписание в дашборде): снимок даже не забираем с камеры
+      if (await isAsleep(shot.at)) {
         await saveRow({
           photo_id: shot.id,
           shot_at: shot.at,
@@ -155,7 +155,7 @@ async function tick(): Promise<void> {
           model: `${FILTER_MODEL_PREFIX}night`,
         })
         attempts.delete(key)
-        console.log(`[BirdAI] photo ${shot.id}: skipped, night`)
+        console.log(`[BirdAI] photo ${shot.id}: skipped, outside schedule`)
         continue
       }
 

@@ -8,11 +8,25 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { BirdAiUsage } from "@/lib/bird-ai-usage";
+import type { BirdScheduleState } from "@/app/api/birdfeeder/schedule/route";
+import {
+  type BirdSchedule,
+  SCHEDULE_PRESETS,
+  findPreset,
+  parseSchedule,
+} from "@/lib/bird-schedule-shared";
+import { cn } from "@/lib/utils";
 
 const fetcher = async (url: string) => {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return (await res.json()) as BirdAiUsage;
+};
+
+const scheduleFetcher = async (url: string) => {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()) as BirdScheduleState;
 };
 
 function usd(v: number | null): string {
@@ -85,6 +99,8 @@ export function BirdAiUsageSection() {
               hint={`потрачено всего ${usd(data.totalUsedUsd)}`}
             />
           </dl>
+
+          <BirdAiScheduleSection />
 
           {data.days.length > 0 && (
             <div>
@@ -299,3 +315,227 @@ function BudgetTile({
     </div>
   );
 }
+
+/**
+ * Часы работы распознавания птиц: вне окна снимки не забираются с камеры
+ * и не уходят в модель. Пресеты по солнцу или фикс. часам, либо своё время.
+ */
+function BirdAiScheduleSection() {
+  const { data, error, mutate } = useSWR(
+    "/api/birdfeeder/schedule",
+    scheduleFetcher,
+    { refreshInterval: 60_000 },
+  );
+
+  const [saving, setSaving] = useState(false);
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customStart, setCustomStart] = useState("06:00");
+  const [customEnd, setCustomEnd] = useState("20:00");
+
+  if (!data && !error) {
+    return (
+      <div className="border-t border-border/50 pt-3">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Loader2 className="size-3.5 animate-spin" />
+          <span>Загрузка расписания…</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !data) return null;
+
+  const currentPresetId = findPreset(data.schedule);
+  const isCustomFixed = currentPresetId === null && data.schedule.mode === "fixed";
+
+  async function save(schedule: BirdSchedule | null) {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/birdfeeder/schedule", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ schedule }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+      await mutate(body, false);
+      setCustomOpen(false);
+      toast.success(
+        schedule === null
+          ? "Расписание сброшено к настройкам по умолчанию"
+          : "Часы работы сохранены",
+      );
+    } catch (e) {
+      toast.error(`Не удалось сохранить: ${(e as Error).message}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleCustomSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const parsed = parseSchedule({
+      mode: "fixed",
+      start: customStart,
+      end: customEnd,
+    });
+    if (!parsed) {
+      toast.error(
+        "Укажите разное корректное время начала и конца, например 07:00 и 20:00",
+      );
+      return;
+    }
+    void save(parsed);
+  }
+
+  function startCustomEdit() {
+    if (data?.schedule.mode === "fixed") {
+      setCustomStart(data.schedule.start);
+      setCustomEnd(data.schedule.end);
+    }
+    setCustomOpen(true);
+  }
+
+  return (
+    <div className="border-t border-border/50 pt-3.5">
+      <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <h3 className="text-xs font-medium text-muted-foreground">
+            Часы работы
+          </h3>
+          {data.awakeNow ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+              <span className="size-1.5 rounded-full bg-emerald-500" />
+              Сейчас активно
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+              <span className="size-1.5 rounded-full bg-muted-foreground/60" />
+              Вне окна
+            </span>
+          )}
+        </div>
+
+        <div className="text-xs text-muted-foreground">
+          {data.today.start && data.today.end ? (
+            <span>
+              Сегодня:{" "}
+              <strong className="font-semibold text-foreground">
+                {data.today.start}–{data.today.end}
+              </strong>
+              {" · "}
+              {data.location.city}
+            </span>
+          ) : (
+            <strong className="font-semibold text-foreground">
+              Круглосуточно
+            </strong>
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        {SCHEDULE_PRESETS.map((p) => {
+          const isActive = currentPresetId === p.id && !customOpen;
+          return (
+            <Button
+              key={p.id}
+              type="button"
+              size="sm"
+              variant={isActive ? "secondary" : "outline"}
+              className={cn(
+                "h-7 text-xs",
+                isActive && "border-primary/40 bg-accent font-medium shadow-xs",
+              )}
+              disabled={saving}
+              onClick={() => {
+                setCustomOpen(false);
+                void save(p.schedule);
+              }}
+            >
+              {p.title}
+            </Button>
+          );
+        })}
+        <Button
+          type="button"
+          size="sm"
+          variant={isCustomFixed || customOpen ? "secondary" : "outline"}
+          className={cn(
+            "h-7 text-xs",
+            (isCustomFixed || customOpen) &&
+              "border-primary/40 bg-accent font-medium shadow-xs",
+          )}
+          disabled={saving}
+          onClick={startCustomEdit}
+        >
+          {isCustomFixed && !customOpen && data.schedule.mode === "fixed"
+            ? `Своё: ${data.schedule.start}–${data.schedule.end}`
+            : "Своё время"}
+        </Button>
+      </div>
+
+      {customOpen && (
+        <form
+          onSubmit={handleCustomSubmit}
+          className="mt-2.5 flex flex-wrap items-center gap-2 rounded-lg bg-muted/40 p-2 text-xs"
+        >
+          <span className="text-muted-foreground">С</span>
+          <Input
+            type="time"
+            value={customStart}
+            onChange={(e) => setCustomStart(e.target.value)}
+            disabled={saving}
+            className="h-7 w-24 text-xs tabular-nums"
+            required
+          />
+          <span className="text-muted-foreground">до</span>
+          <Input
+            type="time"
+            value={customEnd}
+            onChange={(e) => setCustomEnd(e.target.value)}
+            disabled={saving}
+            className="h-7 w-24 text-xs tabular-nums"
+            required
+          />
+          <Button
+            type="submit"
+            size="sm"
+            className="h-7 text-xs"
+            disabled={saving}
+          >
+            {saving ? <Loader2 className="size-3.5 animate-spin" /> : "Сохранить"}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 text-xs"
+            disabled={saving}
+            onClick={() => setCustomOpen(false)}
+          >
+            Отмена
+          </Button>
+        </form>
+      )}
+
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <span>
+          Рассвет {data.today.sun.dawn}, восход {data.today.sun.sunrise}, закат{" "}
+          {data.today.sun.sunset}, сумерки {data.today.sun.dusk}
+        </span>
+        {data.stored && (
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => void save(null)}
+            className="underline-offset-2 hover:underline"
+          >
+            По умолчанию
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+

@@ -96,9 +96,9 @@ flowchart LR
      < scripts/010_retention.sql
    ```
 
-   Для распознавания птиц на кормушке — `scripts/011_bird_detections.sql`
-   `scripts/012_bird_detections_cost.sql` и `scripts/013_bird_ai_budget.sql`
-   (см. `docs/birdfeeder.md`).
+   Для распознавания птиц на кормушке — `scripts/011_bird_detections.sql`,
+   `scripts/012_bird_detections_cost.sql`, `scripts/013_bird_ai_budget.sql`
+   и `scripts/014_bird_ai_schedule.sql` (см. `docs/birdfeeder.md`).
 
 2. **Узнать имя docker-сети** Supabase-стека:
    ```bash

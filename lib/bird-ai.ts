@@ -1,6 +1,5 @@
 import { generateText, type LanguageModelUsage, type ProviderMetadata } from 'ai'
 import { decode as decodeJpeg } from 'jpeg-js'
-import { sunElevation } from '@/lib/sun'
 
 /**
  * Распознавание птиц на снимке с кормушки через Vercel AI Gateway.
@@ -47,33 +46,6 @@ export function getBirdAiModel(): string {
 }
 
 const DEFAULT_MIN_LUMA = 40
-/** Ереван */
-const DEFAULT_LAT = 40.1792
-const DEFAULT_LON = 44.4991
-/** Гражданские сумерки: дрозды и зарянки кормятся и в них */
-const DEFAULT_MIN_SUN_ELEVATION = -6
-
-function envNumber(name: string, fallback: number): number {
-  const raw = process.env[name]
-  const n = raw === undefined || raw === '' ? NaN : Number(raw)
-  return Number.isFinite(n) ? n : fallback
-}
-
-/**
- * Снимок сделан ночью: солнце ниже BIRD_AI_MIN_SUN_ELEVATION (−6°) в точке
- * BIRDFEEDER_LAT/LON. Дневные птицы у кормушки ночью не бывают, а свет лампы
- * или фонаря обманывает и детектор камеры, и фильтр по яркости.
- * BIRD_AI_NIGHT_SKIP=0 — отключить.
- */
-export function isNightShot(at: string): boolean {
-  if (process.env.BIRD_AI_NIGHT_SKIP === '0') return false
-  const elevation = sunElevation(
-    new Date(at),
-    envNumber('BIRDFEEDER_LAT', DEFAULT_LAT),
-    envNumber('BIRDFEEDER_LON', DEFAULT_LON),
-  )
-  return elevation < envNumber('BIRD_AI_MIN_SUN_ELEVATION', DEFAULT_MIN_SUN_ELEVATION)
-}
 
 /** Снимки темнее этого (средняя яркость 0..255) в модель не отправляются */
 export function getBirdAiMinLuma(): number {
