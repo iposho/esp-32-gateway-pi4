@@ -5,6 +5,7 @@ import {
   getBirdAiMinLuma,
   getBirdAiModel,
   isBirdAiEnabled,
+  isNightShot,
   photoLuma,
 } from '@/lib/bird-ai'
 import {
@@ -144,6 +145,20 @@ async function tick(): Promise<void> {
   for (const shot of pending.slice(0, budget)) {
     const key = shotKey(shot.id, shot.at)
     try {
+      // Ночь по солнцу: снимок даже не забираем с камеры
+      if (isNightShot(shot.at)) {
+        await saveRow({
+          photo_id: shot.id,
+          shot_at: shot.at,
+          is_bird: false,
+          bird_count: 0,
+          model: `${FILTER_MODEL_PREFIX}night`,
+        })
+        attempts.delete(key)
+        console.log(`[BirdAI] photo ${shot.id}: skipped, night`)
+        continue
+      }
+
       const photo = await getBirdPhoto(shot.id)
 
       // Тёмный кадр (ночь, комната, объектив закрыт) — птицу там не разглядеть, вызов не нужен
