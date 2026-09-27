@@ -8,6 +8,7 @@ import {
   CameraOff,
   ChevronDown,
   Cpu,
+  Download,
   FolderOpen,
   Loader2,
   Pencil,
@@ -308,11 +309,23 @@ function CameraSection({
   const [imgLoading, setImgLoading] = useState(false);
   const [imgError, setImgError] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  /** Скачанный кадр: показываем его же, чтобы файл совпадал с картинкой */
+  const [downloadedUrl, setDownloadedUrl] = useState<string | null>(null);
   const retryRef = useRef(0);
   const hasPhoto = Boolean(payload.last_photo_url);
+  const photoUrl = `/api/devices/${encodeURIComponent(device.device_id)}/camera`;
+
+  useEffect(() => {
+    return () => {
+      if (downloadedUrl) URL.revokeObjectURL(downloadedUrl);
+    };
+  }, [downloadedUrl]);
 
   useEffect(() => {
     if (payload.capture_count) {
+      // Новый снимок по команде: показываем его, а не ранее скачанный кадр
+      setDownloadedUrl(null);
       setImgTimestamp(Date.now());
       setImgError(false);
       retryRef.current = 0;
@@ -320,10 +333,38 @@ function CameraSection({
   }, [payload.capture_count]);
 
   function refreshPhoto() {
+    setDownloadedUrl(null);
     setImgLoading(true);
     setImgError(false);
     retryRef.current = 0;
     setImgTimestamp(Date.now());
+  }
+
+  // Кадр с камеры каждый раз новый (no-store): берём свежий, сохраняем файлом
+  // и его же показываем
+  async function download() {
+    setIsDownloading(true);
+    try {
+      const res = await fetch(`${photoUrl}?t=${Date.now()}`, { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const url = URL.createObjectURL(await res.blob());
+      const stamp = new Date()
+        .toLocaleString("sv-SE")
+        .replace(" ", "_")
+        .replaceAll(":", "-");
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${device.device_id}_${stamp}.jpg`;
+      a.click();
+      setDownloadedUrl(url);
+      setImgError(false);
+    } catch (e) {
+      toast.error(
+        `Не удалось скачать снимок: ${e instanceof Error ? e.message : e}`,
+      );
+    } finally {
+      setIsDownloading(false);
+    }
   }
 
   async function capture() {
@@ -343,17 +384,33 @@ function CameraSection({
       title="Камера"
       action={
         hasPhoto ? (
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            onClick={refreshPhoto}
-            aria-label="Перезагрузить картинку"
-            title="Перезагрузить картинку"
-          >
-            <RefreshCw
-              className={cn("size-3.5", imgLoading && "animate-spin")}
-            />
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              onClick={() => void download()}
+              disabled={!online || isDownloading}
+              aria-label="Скачать снимок"
+              title="Скачать снимок"
+            >
+              {isDownloading ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Download className="size-3.5" />
+              )}
+            </Button>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              onClick={refreshPhoto}
+              aria-label="Перезагрузить картинку"
+              title="Перезагрузить картинку"
+            >
+              <RefreshCw
+                className={cn("size-3.5", imgLoading && "animate-spin")}
+              />
+            </Button>
+          </div>
         ) : undefined
       }
     >
@@ -361,7 +418,7 @@ function CameraSection({
         {hasPhoto && !imgError ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={`/api/devices/${encodeURIComponent(device.device_id)}/camera?t=${imgTimestamp}`}
+            src={downloadedUrl ?? `${photoUrl}?t=${imgTimestamp}`}
             alt={`Снимок камеры «${device.name}»`}
             className={cn(
               "aspect-video w-full object-contain transition-opacity duration-300",
