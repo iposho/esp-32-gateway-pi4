@@ -36,6 +36,7 @@ esp32-bird-cam (LAN)                         Pi: esp32-admin                    
 | GET | `/api/camera/birdfeeder/birds` | JSON `{ shots: [{ id, at, bird, count, species, latin, confidence }] }` — последние снимки (до 24, новые первыми; кэш 10 с). Снимки, где нейронка не нашла птицу, убраны; `bird: null` — ещё не проверен |
 | GET | `/api/camera/birdfeeder/stats` | JSON — статистика по подтверждённым птицам: `totalVisits`, `recentVisits` (30 дней), `species[{ species, latin, visits, recentVisits, firstSeenAt, lastSeenAt }]`, `byHour[24]` и `byDay[{ date, visits }]` за 30 дней (время `BIRDFEEDER_TZ`), `records{ busiestDay, earliest, latest, mostBirds }`. Кэш 5 мин |
 | GET | `/api/camera/birdfeeder/usage` | JSON — расход модели в USD: `balanceUsd`, `today { calls, spentUsd }`, `days[]`, `last7Usd`, `last30Usd`, `avgPhotoUsd`, `daysLeft` (раздел «Расход в долларах») |
+| POST | `/api/camera/birdfeeder/classify?id=N` | JSON — прогнать снимок N через модель с текущим промптом; в БД не пишет, в дневной лимит не входит, но вызов платный. Для отладки промпта |
 
 ## Переменные `.env`
 
@@ -87,6 +88,10 @@ admin, раз в 15 с (lib/bird-classifier.ts):
 статус и лента → только is_bird = true
 ```
 
+- **Промпт** учитывает особенности камеры: пересвеченное белое у OV3660 уходит в розовый,
+  а птица вплотную к объективу выглядит размытым серым пятном, обрезанным краем кадра, —
+  это тоже `bird=true` (вид обычно `null`). Цвет подбирается в прошивке ≥ 1.3.3
+  слайдерами «Экспозиция», «Насыщенность», «Баланс белого» на странице камеры.
 - **Визит** — серия снимков с птицами без пауз дольше 60 с (как `BIRD_VISIT_GAP_MS`
   в прошивке). Вид визита — самый уверенный ответ модели среди его снимков.
   «Сегодня» считается по `BIRDFEEDER_TZ` (по умолчанию `Asia/Yerevan`).
