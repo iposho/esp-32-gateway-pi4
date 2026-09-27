@@ -1,5 +1,12 @@
 import { getServiceClient } from '@/lib/supabase/server'
-import { type BirdAiCostError, classifyBirdPhoto, getBirdAiModel, isBirdAiEnabled } from '@/lib/bird-ai'
+import {
+  type BirdAiCostError,
+  classifyBirdPhoto,
+  getBirdAiMinLuma,
+  getBirdAiModel,
+  isBirdAiEnabled,
+  photoLuma,
+} from '@/lib/bird-ai'
 import {
   CameraUnavailableError,
   getBirdfeederDeviceId,
@@ -23,6 +30,8 @@ const MAX_ATTEMPTS = 3
 const AUTH_PAUSE_MS = 30 * 60_000
 const RATE_PAUSE_MS = 60_000
 const DEFAULT_DAILY_LIMIT = 300
+/** model у строк, которые отсеял фильтр до модели: не вызов, в лимит не входит */
+export const FILTER_MODEL_PREFIX = 'filter:'
 /** Не больше стольких вызовов модели за проход: иначе при сбое модели каждый проход бьёт по всем 24 снимкам */
 const MAX_CALLS_PER_TICK = 3
 
@@ -115,6 +124,7 @@ async function tick(): Promise<void> {
       .from('bird_detections')
       .select('id', { count: 'exact', head: true })
       .gte('created_at', day)
+      .not('model', 'like', `${FILTER_MODEL_PREFIX}%`)
     if (countErr) throw new Error(countErr.message)
     calls.day = day
     calls.count = count ?? 0
@@ -135,7 +145,23 @@ async function tick(): Promise<void> {
     const key = shotKey(shot.id, shot.at)
     try {
       const photo = await getBirdPhoto(shot.id)
-      calls.count++
+
+      // Тёмный кадр (ночь, комната, объектив закрыт) — птицу там не разглядеть, вызов не нужен
+      const luma = photoLuma(photo.body)
+      if (luma !== null && luma < getBirdAiMinLuma()) {
+        await saveRow({
+          photo_id: shot.id,
+          shot_at: shot.at,
+          is_bird: false,
+          bird_count: 0,
+          model: `${FILTER_MODEL_PREFIX}dark`,
+        })
+        attempts.delete(key)
+        console.log(`[BirdAI] photo ${shot.id}: skipped, dark (luma ${luma} < ${getBirdAiMinLuma()})`)
+        continue
+      }
+
+      counters.calls.count++
       const startedAt = Date.now()
       const r = await classifyBirdPhoto(photo.body).catch((e: unknown) => {
         throw Object.assign(e as Error, { elapsedMs: Date.now() - startedAt })
@@ -159,7 +185,7 @@ async function tick(): Promise<void> {
       attempts.delete(key)
       console.log(
         `[BirdAI] photo ${shot.id}: ${r.bird ? `bird ×${r.count} ${r.species ?? '?'} ${Math.round(r.confidence * 100)}%` : 'no bird'}` +
-          ` (${r.inputTokens ?? '?'}+${r.outputTokens ?? '?'} tok, ${formatUsd(r.costUsd)}, ${Date.now() - startedAt} ms)`,
+          ` (luma ${luma ?? '?'}, ${r.inputTokens ?? '?'}+${r.outputTokens ?? '?'} tok, ${formatUsd(r.costUsd)}, ${Date.now() - startedAt} ms)`,
       )
     } catch (e) {
       failed = true

@@ -1,4 +1,5 @@
 import { generateText, type LanguageModelUsage, type ProviderMetadata } from 'ai'
+import { decode as decodeJpeg } from 'jpeg-js'
 
 /**
  * Распознавание птиц на снимке с кормушки через Vercel AI Gateway.
@@ -42,6 +43,38 @@ export function isBirdAiEnabled(): boolean {
 
 export function getBirdAiModel(): string {
   return process.env.BIRD_AI_MODEL || DEFAULT_MODEL
+}
+
+const DEFAULT_MIN_LUMA = 40
+
+/** Снимки темнее этого (средняя яркость 0..255) в модель не отправляются */
+export function getBirdAiMinLuma(): number {
+  const n = Number(process.env.BIRD_AI_MIN_LUMA)
+  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_MIN_LUMA
+}
+
+/**
+ * Средняя яркость снимка 0..255, как считает прошивка (Y = 0.3R + 0.59G + 0.11B),
+ * по каждому 4-му пикселю. null — JPEG не разобрался, тогда снимок уходит в модель.
+ */
+export function photoLuma(jpeg: ArrayBuffer): number | null {
+  try {
+    const img = decodeJpeg(new Uint8Array(jpeg), {
+      useTArray: true,
+      formatAsRGBA: false,
+      maxResolutionInMP: 4,
+    })
+    const { data } = img
+    let sum = 0
+    let n = 0
+    for (let i = 0; i + 2 < data.length; i += 12) {
+      sum += (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8
+      n++
+    }
+    return n ? Math.round(sum / n) : null
+  } catch {
+    return null
+  }
 }
 
 export type BirdAiResult = {
