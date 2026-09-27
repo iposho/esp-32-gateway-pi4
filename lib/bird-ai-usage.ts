@@ -32,7 +32,7 @@ export type BirdAiUsage = {
   requests30: number | null
   /** Средняя цена одного снимка (с неудачными попытками) по последним 200 */
   avgPhotoUsd: number | null
-  /** На сколько дней хватит остатка при расходе последних 7 дней */
+  /** На сколько дней хватит остатка при среднем дневном расходе последних 7 дней */
   daysLeft: number | null
   errors: string[]
 }
@@ -139,7 +139,9 @@ export async function getBirdAiUsage(): Promise<BirdAiUsage> {
     : null
   const last30Usd = reportOk ? gw.days.reduce((s, d) => s + d.costUsd, 0) : null
   const requests30 = reportOk ? gw.days.reduce((s, d) => s + d.requests, 0) : null
-  const perDay = last7Usd !== null ? last7Usd / 7 : null
+  // Делим на дни, за которые в отчёте есть данные: в первую неделю «/ 7» занижает расход
+  const activeDays = gw.days.filter((d) => d.day >= since7 && d.costUsd > 0).length
+  const perDay = last7Usd !== null && activeDays > 0 ? last7Usd / activeDays : null
 
   return {
     ...base,

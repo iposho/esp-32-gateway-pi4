@@ -29,25 +29,36 @@ const MAX_CALLS_PER_TICK = 3
 const attempts = new Map<string, number>()
 /** Цена неудачных попыток снимка: войдёт в cost_usd его итоговой строки */
 const failedCost = new Map<string, number>()
-/** Вызовы модели за сутки, включая неудачные. Строк в БД для них может не быть */
-let calls = { day: '', count: 0 }
-/** Расход этого процесса за сутки, USD (после рестарта — с нуля; точный — отчёт Gateway) */
-let spent = { day: '', usd: 0 }
+/*
+ * Счётчики — в globalThis: цикл запускается из instrumentation, а /usage читает их
+ * из бандла роута, где у модуля своя копия с вечно пустыми переменными.
+ */
+const counters = ((globalThis as unknown as { __birdAiCounters?: BirdAiCounters }).__birdAiCounters ??= {
+  /** Вызовы модели за сутки, включая неудачные. Строк в БД для них может не быть */
+  calls: { day: '', count: 0 },
+  /** Расход этого процесса за сутки, USD (после рестарта — с нуля; точный — отчёт Gateway) */
+  spent: { day: '', usd: 0 },
+})
+
+type BirdAiCounters = {
+  calls: { day: string; count: number }
+  spent: { day: string; usd: number }
+}
 let costColumnMissing = false
 
 /** Для /usage: вызовы модели и расход с начала суток по счётчику процесса */
 export function getBirdAiCallsToday(): { calls: number; spentUsd: number } {
   const day = startOfLocalDay().toISOString()
   return {
-    calls: calls.day === day ? calls.count : 0,
-    spentUsd: spent.day === day ? spent.usd : 0,
+    calls: counters.calls.day === day ? counters.calls.count : 0,
+    spentUsd: counters.spent.day === day ? counters.spent.usd : 0,
   }
 }
 
 function addSpent(day: string, usd: number | null | undefined): void {
   if (!usd) return
-  if (spent.day !== day) spent = { day, usd: 0 }
-  spent.usd += usd
+  if (counters.spent.day !== day) counters.spent = { day, usd: 0 }
+  counters.spent.usd += usd
 }
 let pausedUntil = 0
 /** bird_photo_id из телеметрии, для которого все снимки уже разобраны */
@@ -97,6 +108,7 @@ async function tick(): Promise<void> {
   }
 
   const day = startOfLocalDay().toISOString()
+  const { calls } = counters
   if (calls.day !== day) {
     // После рестарта за сегодня известны только записанные строки
     const { count, error: countErr } = await supabase
@@ -104,7 +116,8 @@ async function tick(): Promise<void> {
       .select('id', { count: 'exact', head: true })
       .gte('created_at', day)
     if (countErr) throw new Error(countErr.message)
-    calls = { day, count: count ?? 0 }
+    calls.day = day
+    calls.count = count ?? 0
   }
 
   const budget = Math.min(dailyLimit() - calls.count, MAX_CALLS_PER_TICK)
