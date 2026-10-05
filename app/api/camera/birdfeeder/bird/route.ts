@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { cameraCorsHeaders } from '@/lib/camera-auth'
-import { CameraUnavailableError, getBirdPhoto, getCameraState } from '@/lib/birdfeeder'
+import { CameraRequestError, CameraUnavailableError, getBirdPhoto, getCameraState } from '@/lib/birdfeeder'
 
 export const dynamic = 'force-dynamic'
 
@@ -38,6 +38,9 @@ export async function GET(request: NextRequest) {
       },
     })
   } catch (e) {
+    if (e instanceof CameraRequestError && e.status === 404) {
+      return new NextResponse('Photo not found', { status: 404, headers: cameraCorsHeaders })
+    }
     if (e instanceof CameraUnavailableError) {
       return new NextResponse('Camera unavailable', { status: 503, headers: cameraCorsHeaders })
     }

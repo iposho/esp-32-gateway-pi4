@@ -2,13 +2,19 @@ import { getServiceClient } from '@/lib/supabase/server'
 import {
   type BirdAiCostError,
   classifyBirdPhoto,
+  getBirdAiMinBirdConfidence,
   getBirdAiMinLuma,
   getBirdAiModel,
   isBirdAiEnabled,
+  isBirdAiReferenceEnabled,
+  passesBirdThreshold,
   photoLuma,
+  shrinkJpeg,
 } from '@/lib/bird-ai'
+import { saveBirdPhoto } from '@/lib/bird-photos'
 import { isAsleep } from '@/lib/bird-schedule'
 import {
+  CameraRequestError,
   CameraUnavailableError,
   getBirdfeederDeviceId,
   getBirdPhoto,
@@ -48,13 +54,36 @@ const counters = ((globalThis as unknown as { __birdAiCounters?: BirdAiCounters 
   calls: { day: '', count: 0 },
   /** Расход этого процесса за сутки, USD (после рестарта — с нуля; точный — отчёт Gateway) */
   spent: { day: '', usd: 0 },
+  /** Вызовы мимо цикла за сутки: строк в БД у них нет, при сверке с БД добавляются */
+  extra: { day: '', count: 0 },
 })
 
 type BirdAiCounters = {
   calls: { day: string; count: number }
   spent: { day: string; usd: number }
+  extra: { day: string; count: number }
 }
-let costColumnMissing = false
+/** Колонки из поздних scripts/*.sql: если скрипт не применён, строка пишется без них */
+const OPTIONAL_COLUMNS: Record<string, string> = {
+  cost_usd: '012_bird_detections_cost.sql',
+  bird_confidence: '015_bird_photos.sql',
+  prompt_version: '015_bird_photos.sql',
+  photo_path: '015_bird_photos.sql',
+  reference_path: '015_bird_photos.sql',
+}
+const missingColumns = new Set<string>()
+
+/** Кадр для сравнения старше этого по времени съёмки не берём: свет уже другой */
+const REFERENCE_MAX_AGE_MS = 2 * 60 * 60_000
+/** Пустым кадром считаем только уверенное «птицы нет» */
+const REFERENCE_MAX_BIRD_CONFIDENCE = 0.2
+/** Последний уверенно пустой снимок: уменьшенная копия и путь оригинала в Storage */
+let reference: { at: number; body: ArrayBuffer; path: string | null } | null = null
+
+function referenceFor(shotAt: string): typeof reference {
+  if (!reference || !isBirdAiReferenceEnabled()) return null
+  return Math.abs(Date.parse(shotAt) - reference.at) <= REFERENCE_MAX_AGE_MS ? reference : null
+}
 
 /** Для /usage: вызовы модели и расход с начала суток по счётчику процесса */
 export function getBirdAiCallsToday(): { calls: number; spentUsd: number } {
@@ -63,6 +92,26 @@ export function getBirdAiCallsToday(): { calls: number; spentUsd: number } {
     calls: counters.calls.day === day ? counters.calls.count : 0,
     spentUsd: counters.spent.day === day ? counters.spent.usd : 0,
   }
+}
+
+/**
+ * Вызов модели мимо цикла (/api/birdfeeder/classify, /eval): тоже входит в дневной
+ * лимит и расход за сутки, иначе отладка незаметно съедает кредиты.
+ * false — лимит на сегодня исчерпан, вызывать нельзя.
+ */
+export function reserveExtraCalls(n: number): boolean {
+  const day = startOfLocalDay().toISOString()
+  if (counters.extra.day !== day) counters.extra = { day, count: 0 }
+  // Пока цикл не сверился с БД за сегодня, известны только эти вызовы
+  const used = counters.calls.day === day ? counters.calls.count : counters.extra.count
+  if (used + n > dailyLimit()) return false
+  counters.extra.count += n
+  if (counters.calls.day === day) counters.calls.count += n
+  return true
+}
+
+export function addExtraSpent(usd: number | null | undefined): void {
+  addSpent(startOfLocalDay().toISOString(), usd)
 }
 
 function addSpent(day: string, usd: number | null | undefined): void {
@@ -128,7 +177,7 @@ async function tick(): Promise<void> {
       .not('model', 'like', `${FILTER_MODEL_PREFIX}%`)
     if (countErr) throw new Error(countErr.message)
     calls.day = day
-    calls.count = count ?? 0
+    calls.count = (count ?? 0) + (counters.extra.day === day ? counters.extra.count : 0)
   }
 
   const budget = Math.min(dailyLimit() - calls.count, MAX_CALLS_PER_TICK)
@@ -144,6 +193,8 @@ async function tick(): Promise<void> {
   let failed = false
   for (const shot of pending.slice(0, budget)) {
     const key = shotKey(shot.id, shot.at)
+    let photo: Awaited<ReturnType<typeof getBirdPhoto>> | undefined
+    const ref = referenceFor(shot.at)
     try {
       // Вне часов работы (расписание в дашборде): снимок даже не забираем с камеры
       if (await isAsleep(shot.at)) {
@@ -159,7 +210,7 @@ async function tick(): Promise<void> {
         continue
       }
 
-      const photo = await getBirdPhoto(shot.id)
+      photo = await getBirdPhoto(shot.id)
 
       // Тёмный кадр (ночь, комната, объектив закрыт) — птицу там не разглядеть, вызов не нужен
       const luma = photoLuma(photo.body)
@@ -178,33 +229,52 @@ async function tick(): Promise<void> {
 
       counters.calls.count++
       const startedAt = Date.now()
-      const r = await classifyBirdPhoto(photo.body).catch((e: unknown) => {
+      const r = await classifyBirdPhoto(photo.body, { reference: ref?.body }).catch((e: unknown) => {
         throw Object.assign(e as Error, { elapsedMs: Date.now() - startedAt })
       })
       addSpent(day, r.costUsd)
       const prevCost = failedCost.get(key) ?? 0
       failedCost.delete(key)
+      const photoPath = await saveBirdPhoto(shot, photo.body)
+      if (
+        !r.bird &&
+        r.birdConfidence !== null &&
+        r.birdConfidence <= REFERENCE_MAX_BIRD_CONFIDENCE &&
+        isBirdAiReferenceEnabled() &&
+        (!reference || Date.parse(shot.at) > reference.at)
+      ) {
+        const small = shrinkJpeg(photo.body)
+        reference = { at: Date.parse(shot.at), body: small ?? photo.body, path: photoPath }
+      }
+      // Неуверенное «птица» ниже порога — не визит; вид и уверенность остаются для разбора
+      const isBird = passesBirdThreshold(r)
       await saveRow({
         photo_id: shot.id,
         shot_at: shot.at,
-        is_bird: r.bird,
-        bird_count: r.count,
+        is_bird: isBird,
+        bird_count: isBird ? r.count : 0,
         species: r.species,
         species_latin: r.latin,
         confidence: r.confidence,
+        bird_confidence: r.birdConfidence,
         model: r.model,
+        prompt_version: r.promptVersion,
+        photo_path: photoPath,
+        reference_path: r.withReference ? (ref?.path ?? null) : null,
         input_tokens: r.inputTokens,
         output_tokens: r.outputTokens,
         cost_usd: r.costUsd === null && prevCost === 0 ? null : (r.costUsd ?? 0) + prevCost,
       })
       attempts.delete(key)
       console.log(
-        `[BirdAI] photo ${shot.id}: ${r.bird ? `bird ×${r.count} ${r.species ?? '?'} ${Math.round(r.confidence * 100)}%` : 'no bird'}` +
-          ` (luma ${luma ?? '?'}, ${r.inputTokens ?? '?'}+${r.outputTokens ?? '?'} tok, ${formatUsd(r.costUsd)}, ${Date.now() - startedAt} ms)`,
+        `[BirdAI] photo ${shot.id}: ${isBird ? `bird ×${r.count} ${r.species ?? '?'} ${Math.round(r.confidence * 100)}%` : r.bird ? `no bird (below ${getBirdAiMinBirdConfidence()})` : 'no bird'}` +
+          ` (bird ${r.birdConfidence === null ? '?' : Math.round(r.birdConfidence * 100) + '%'}${r.withReference ? ', ref' : ''}, luma ${luma ?? '?'}, ${r.inputTokens ?? '?'}+${r.outputTokens ?? '?'} tok, ${formatUsd(r.costUsd)}, ${Date.now() - startedAt} ms)`,
       )
     } catch (e) {
       failed = true
-      if (e instanceof CameraUnavailableError) return
+      // Камера недоступна — ждём следующего прохода. Ответ 4xx на конкретный снимок
+      // (нет на SD, битый файл) — сбой этого снимка: иначе он навсегда застопорит очередь
+      if (e instanceof CameraUnavailableError && !(e instanceof CameraRequestError)) return
 
       const cost = (e as BirdAiCostError).costUsd
       addSpent(day, cost)
@@ -238,6 +308,7 @@ async function tick(): Promise<void> {
         shot_at: shot.at,
         is_bird: null,
         model: getBirdAiModel(),
+        photo_path: photo ? await saveBirdPhoto(shot, photo.body) : null,
         cost_usd: total ?? null,
         error: message.slice(0, 500),
       })
@@ -260,15 +331,18 @@ async function saveRow(row: Record<string, unknown>): Promise<void> {
         { onConflict: 'device_id,photo_id,shot_at', ignoreDuplicates: true },
       )
 
-  // Колонка cost_usd появляется в scripts/012; без неё пишем строку без цены
-  const { cost_usd: _cost, ...withoutCost } = row
-  let { error } = await upsert(costColumnMissing ? withoutCost : row)
-  if (error && !costColumnMissing && error.message.includes('cost_usd')) {
-    costColumnMissing = true
-    console.warn('[BirdAI] no bird_detections.cost_usd — apply scripts/012_bird_detections_cost.sql')
-    ;({ error } = await upsert(withoutCost))
+  // Колонки поздних скриптов: без них пишем строку без этих полей и предупреждаем один раз
+  for (;;) {
+    const r = Object.fromEntries(Object.entries(row).filter(([k]) => !missingColumns.has(k)))
+    const { error } = await upsert(r)
+    if (!error) return
+    const column = Object.keys(OPTIONAL_COLUMNS).find(
+      (c) => c in r && !missingColumns.has(c) && error.message.includes(c),
+    )
+    if (!column) throw new Error(`save detection: ${error.message}`)
+    missingColumns.add(column)
+    console.warn(`[BirdAI] no bird_detections.${column} — apply scripts/${OPTIONAL_COLUMNS[column]}`)
   }
-  if (error) throw new Error(`save detection: ${error.message}`)
 }
 
 const globalForBirdAi = globalThis as unknown as { __birdClassifier?: NodeJS.Timeout }

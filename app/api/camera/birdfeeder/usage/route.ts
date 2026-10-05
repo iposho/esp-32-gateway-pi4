@@ -8,7 +8,10 @@ export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: cameraCorsHeaders })
 }
 
-/** Расход модели распознавания птиц в USD: остаток кредитов, по дням, средняя цена снимка */
+/**
+ * Расход модели для админки kuzyak.in (блок «Расход распознавания»): сайт ходит сюда
+ * с сервера с CAMERA_API_TOKEN, в браузер токен не уходит. Дашборд шлюза — /api/birdfeeder/usage.
+ */
 export async function GET() {
   try {
     const usage = await getBirdAiUsage()

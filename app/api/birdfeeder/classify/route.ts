@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server'
-import { classifyBirdPhoto, isBirdAiEnabled } from '@/lib/bird-ai'
+import { type BirdAiCostError, classifyBirdPhoto, isBirdAiEnabled } from '@/lib/bird-ai'
+import { addExtraSpent, reserveExtraCalls } from '@/lib/bird-classifier'
 import { CameraUnavailableError, getBirdPhoto } from '@/lib/birdfeeder'
 
 export const dynamic = 'force-dynamic'
@@ -9,8 +10,9 @@ const MAX_PHOTO_ID = 4799
 
 /**
  * Отладка промпта: прогнать снимок ?id=N через модель и вернуть ответ.
- * В bird_detections не пишет и в дневной лимит не входит, но вызов платный.
- * POST, чтобы снимок не уходил в модель от случайного GET.
+ * В bird_detections не пишет, но вызов платный и входит в дневной лимит BIRD_AI_DAILY_LIMIT.
+ * POST, чтобы снимок не уходил в модель от случайного GET. Путь вне /api/camera:
+ * CAMERA_API_TOKEN внешнего сайта не должен тратить кредиты, сюда — только вход в админку.
  */
 export async function POST(request: NextRequest) {
   if (!isBirdAiEnabled()) {
@@ -24,8 +26,15 @@ export async function POST(request: NextRequest) {
 
   try {
     const photo = await getBirdPhoto(id)
+    if (!reserveExtraCalls(1)) {
+      return NextResponse.json({ error: 'daily limit reached' }, { status: 429 })
+    }
     const startedAt = Date.now()
-    const result = await classifyBirdPhoto(photo.body)
+    const result = await classifyBirdPhoto(photo.body).catch((e: BirdAiCostError) => {
+      addExtraSpent(e.costUsd)
+      throw e
+    })
+    addExtraSpent(result.costUsd)
     return NextResponse.json(
       { id, ...result, ms: Date.now() - startedAt },
       { headers: { 'Cache-Control': 'no-store' } },

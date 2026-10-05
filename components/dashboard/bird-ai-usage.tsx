@@ -40,7 +40,7 @@ function usd(v: number | null): string {
 /** Расход модели распознавания птиц — на странице камеры кормушки */
 export function BirdAiUsageSection() {
   const { data, error, isLoading, mutate } = useSWR(
-    "/api/camera/birdfeeder/usage",
+    "/api/birdfeeder/usage",
     fetcher,
     { refreshInterval: 60_000 },
   );

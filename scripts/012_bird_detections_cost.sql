@@ -6,7 +6,7 @@
 --
 -- Цена — из ответа AI Gateway, иначе по токенам и прайсу модели.
 -- Включает неудачные попытки того же снимка. Точный расход по дням
--- (со всеми вызовами) — отчёт Gateway по тегу birdfeeder: /api/camera/birdfeeder/usage.
+-- (со всеми вызовами) — отчёт Gateway по тегу birdfeeder: /api/birdfeeder/usage.
 -- =====================================================================
 
 alter table public.bird_detections

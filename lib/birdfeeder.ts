@@ -1,6 +1,7 @@
 import { getServiceClient } from '@/lib/supabase/server'
 import { isDeviceActive } from '@/lib/types'
 import { isBirdAiEnabled } from '@/lib/bird-ai'
+import { normalizeSpecies } from '@/lib/bird-species'
 
 /**
  * Кормушка: камера (esp32-bird-cam) сама делает кадр раз в секунду, ищет движение
@@ -241,12 +242,14 @@ async function loadAiStatus(): Promise<Partial<BirdfeederStatus>> {
     prevAt = at
   }
 
+  // Одинаковый вид под разными написаниями — одна строка (lib/bird-species.ts)
   const bySpecies = new Map<string, { species: string; latin: string | null; visits: number }>()
   for (const v of visits) {
-    if (!v.species) continue
-    const entry = bySpecies.get(v.species) ?? { species: v.species, latin: v.species_latin, visits: 0 }
+    const name = normalizeSpecies(v.species, v.species_latin)
+    if (!name.key || !name.species) continue
+    const entry = bySpecies.get(name.key) ?? { species: name.species, latin: name.latin, visits: 0 }
     entry.visits++
-    bySpecies.set(v.species, entry)
+    bySpecies.set(name.key, entry)
   }
 
   const last = ((lastRes.data ?? []) as DetectionRow[])[0]
@@ -255,7 +258,7 @@ async function loadAiStatus(): Promise<Partial<BirdfeederStatus>> {
     visitsToday: visits.length,
     birdLastAt: last ? new Date(last.shot_at).toISOString().replace(/\.\d{3}Z$/, 'Z') : null,
     birdPhotoId: last?.photo_id ?? null,
-    species: last?.species ?? null,
+    species: last ? normalizeSpecies(last.species, last.species_latin).species : null,
     speciesToday: [...bySpecies.values()].sort((a, b) => b.visits - a.visits),
   }
 }
@@ -263,6 +266,17 @@ async function loadAiStatus(): Promise<Partial<BirdfeederStatus>> {
 export const getCameraState = cached(STATE_TTL_MS, loadState)
 
 export class CameraUnavailableError extends Error {}
+
+/**
+ * Камера ответила 4xx: она на связи, но запрос не выполнить (снимка с таким id
+ * нет на SD, файл битый). Для цикла распознавания это сбой одного снимка,
+ * а не «камера недоступна»: остальные снимки обрабатываются дальше.
+ */
+export class CameraRequestError extends CameraUnavailableError {
+  constructor(readonly status: number) {
+    super(`camera responded ${status}`)
+  }
+}
 
 /**
  * Веб-сервер ESP32 обслуживает один запрос за раз: параллельные запросы
@@ -287,7 +301,11 @@ function fetchCamera(url: string, accept: string): Promise<Response> {
         signal: AbortSignal.timeout(CAMERA_TIMEOUT_MS),
         headers: { Accept: accept },
       })
-      if (!res.ok) throw new CameraUnavailableError(`camera responded ${res.status}`)
+      if (!res.ok) {
+        throw res.status >= 400 && res.status < 500
+          ? new CameraRequestError(res.status)
+          : new CameraUnavailableError(`camera responded ${res.status}`)
+      }
       // Тело читаем внутри очереди: пока оно не дочитано, камера занята.
       // Таймаут на чтении тела — тоже «камера недоступна», а не сбой распознавания.
       body = await res.arrayBuffer()
@@ -372,51 +390,58 @@ export type BirdShotDetails = BirdShot & {
 
 /**
  * Лента для сайта: снимки камеры с ответом нейронки.
- * Снимки, где нейронка птицу не нашла, из ленты убираются.
+ * С нейронкой в ленту попадают только подтверждённые птицы: непроверенные
+ * снимки (очередь, ошибка модели, дневной лимит) могут оказаться людьми или руками.
+ * all — журнал камеры целиком (для админки сайта): снимки без птицы всё равно
+ * убраны, непроверенные идут с bird: null.
  */
-export const getBirdShotsWithDetections = cached(
-  BIRD_SHOTS_TTL_MS,
-  async (): Promise<BirdShotDetails[]> => {
-    const shots = await getBirdShots()
-    const plain = (s: BirdShot): BirdShotDetails => ({
-      ...s,
-      bird: null,
-      count: null,
-      species: null,
-      latin: null,
-      confidence: null,
+const getShotsCached = {
+  birds: cached(BIRD_SHOTS_TTL_MS, () => loadShotsWithDetections(false)),
+  all: cached(BIRD_SHOTS_TTL_MS, () => loadShotsWithDetections(true)),
+}
+
+export function getBirdShotsWithDetections(all = false): Promise<BirdShotDetails[]> {
+  return all ? getShotsCached.all() : getShotsCached.birds()
+}
+
+async function loadShotsWithDetections(all: boolean): Promise<BirdShotDetails[]> {
+  const shots = await getBirdShots()
+  const plain = (s: BirdShot): BirdShotDetails => ({
+    ...s,
+    bird: null,
+    count: null,
+    species: null,
+    latin: null,
+    confidence: null,
+  })
+  if (!isBirdAiEnabled() || shots.length === 0) return shots.map(plain)
+
+  const { data, error } = await getServiceClient()
+    .from('bird_detections')
+    .select(DETECTION_COLUMNS)
+    .eq('device_id', getBirdfeederDeviceId())
+    .gte('shot_at', shots[shots.length - 1].at)
+    .abortSignal(AbortSignal.timeout(DB_TIMEOUT_MS))
+  // Нет таблицы или БД тормозит — пустая лента, а не непроверенные снимки
+  if (error) throw new Error(`detections unavailable: ${error.message}`)
+
+  const byKey = new Map(((data ?? []) as DetectionRow[]).map((d) => [shotKey(d.photo_id, d.shot_at), d]))
+  const result: BirdShotDetails[] = []
+  for (const shot of shots) {
+    const d = byKey.get(shotKey(shot.id, shot.at))
+    if (d?.is_bird !== true) {
+      if (all && d?.is_bird !== false) result.push(plain(shot))
+      continue
+    }
+    const name = normalizeSpecies(d.species, d.species_latin)
+    result.push({
+      ...shot,
+      bird: true,
+      count: d.bird_count,
+      species: name.species,
+      latin: name.latin,
+      confidence: d.confidence,
     })
-    if (!isBirdAiEnabled() || shots.length === 0) return shots.map(plain)
-
-    const { data, error } = await getServiceClient()
-      .from('bird_detections')
-      .select(DETECTION_COLUMNS)
-      .eq('device_id', getBirdfeederDeviceId())
-      .gte('shot_at', shots[shots.length - 1].at)
-      .abortSignal(AbortSignal.timeout(DB_TIMEOUT_MS))
-    if (error) {
-      console.warn('[Birdfeeder] detections unavailable:', error.message)
-      return shots.map(plain)
-    }
-
-    const byKey = new Map(((data ?? []) as DetectionRow[]).map((d) => [shotKey(d.photo_id, d.shot_at), d]))
-    const result: BirdShotDetails[] = []
-    for (const shot of shots) {
-      const d = byKey.get(shotKey(shot.id, shot.at))
-      if (d?.is_bird === false) continue
-      result.push(
-        d && d.is_bird
-          ? {
-              ...shot,
-              bird: true,
-              count: d.bird_count,
-              species: d.species,
-              latin: d.species_latin,
-              confidence: d.confidence,
-            }
-          : plain(shot),
-      )
-    }
-    return result
-  },
-)
+  }
+  return result
+}

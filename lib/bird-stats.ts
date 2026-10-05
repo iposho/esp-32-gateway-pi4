@@ -1,10 +1,14 @@
 import { getServiceClient } from '@/lib/supabase/server'
 import { BIRD_VISIT_GAP_MS, getBirdfeederDeviceId, getBirdfeederTimeZone } from '@/lib/birdfeeder'
+import { normalizeSpecies } from '@/lib/bird-species'
 
 /**
  * Статистика кормушки по подтверждённым нейронкой птицам (bird_detections.is_bird).
  * Визит — серия снимков с птицами без пауз дольше BIRD_VISIT_GAP_MS (как в статусе),
  * вид визита — самый уверенный ответ модели среди его снимков.
+ * Визиты собирает функция БД bird_visits (scripts/016): в admin приходит строка
+ * на визит, а не все снимки. Без неё — старый путь: все снимки и группировка здесь.
+ * Виды сводятся к единому названию по латыни (lib/bird-species.ts).
  */
 
 const STATS_TTL_MS = 5 * 60_000
@@ -21,7 +25,7 @@ type Row = {
   confidence: number | null
 }
 
-type Visit = {
+export type Visit = {
   at: number
   species: string | null
   latin: string | null
@@ -81,6 +85,49 @@ function localParts(ms: number, timeZone: string): { date: string; hour: number;
   return { date: `${parts.year}-${parts.month}-${parts.day}`, hour, minuteOfDay: hour * 60 + Number(parts.minute) }
 }
 
+type VisitRow = {
+  started_at: string
+  species: string | null
+  species_latin: string | null
+  confidence: number | null
+  max_count: number
+}
+
+/** null — функции bird_visits нет (scripts/016 не применён) */
+async function loadVisitsSql(): Promise<Visit[] | null> {
+  const supabase = getServiceClient()
+  const deviceId = getBirdfeederDeviceId()
+  const visits: Visit[] = []
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await supabase
+      .rpc('bird_visits', { p_device_id: deviceId, p_gap_seconds: BIRD_VISIT_GAP_MS / 1000 })
+      .range(from, from + PAGE_SIZE - 1)
+      .abortSignal(AbortSignal.timeout(DB_TIMEOUT_MS))
+    if (error) {
+      if (error.code === 'PGRST202' || /bird_visits/.test(error.message)) {
+        if (!sqlMissingLogged) {
+          sqlMissingLogged = true
+          console.warn('[Birdfeeder] no bird_visits() — apply scripts/016_bird_visits.sql; stats load all rows')
+        }
+        return null
+      }
+      throw new Error(error.message)
+    }
+    for (const r of (data ?? []) as VisitRow[]) {
+      visits.push({
+        at: Date.parse(r.started_at),
+        species: r.species,
+        latin: r.species_latin,
+        confidence: r.species ? (r.confidence ?? 0) : -1,
+        maxCount: r.max_count,
+      })
+    }
+    if (!data || data.length < PAGE_SIZE) return visits
+  }
+}
+
+let sqlMissingLogged = false
+
 async function loadRows(): Promise<Row[]> {
   const supabase = getServiceClient()
   const deviceId = getBirdfeederDeviceId()
@@ -122,9 +169,16 @@ function groupVisits(rows: Row[]): Visit[] {
   return visits
 }
 
-export function computeBirdStats(rows: Row[], now = Date.now(), timeZone = getBirdfeederTimeZone()): BirdStats {
+/** Визиты по времени начала, старые первыми */
+async function loadVisits(): Promise<Visit[]> {
+  const fromSql = await loadVisitsSql()
+  if (fromSql) return fromSql
+  const rows = await loadRows()
   // Группировка в визиты требует порядка по времени
-  const visits = groupVisits([...rows].sort((a, b) => Date.parse(a.shot_at) - Date.parse(b.shot_at)))
+  return groupVisits([...rows].sort((a, b) => Date.parse(a.shot_at) - Date.parse(b.shot_at)))
+}
+
+export function computeBirdStats(visits: Visit[], now = Date.now(), timeZone = getBirdfeederTimeZone()): BirdStats {
   const today = localParts(now, timeZone).date
   // Даты последних STATS_DAYS дней в местном часовом поясе (сдвиг на сутки с запасом на переход времени)
   const dates: string[] = []
@@ -157,10 +211,11 @@ export function computeBirdStats(rows: Row[], now = Date.now(), timeZone = getBi
     if (!latest || minuteOfDay > latest.m) latest = { v, m: minuteOfDay }
     if (!mostBirds || v.maxCount > mostBirds.maxCount) mostBirds = v
 
-    if (v.species) {
-      const entry = species.get(v.species) ?? {
-        species: v.species,
-        latin: v.latin,
+    const name = normalizeSpecies(v.species, v.latin)
+    if (name.key && name.species) {
+      const entry = species.get(name.key) ?? {
+        species: name.species,
+        latin: name.latin,
         visits: 0,
         recentVisits: 0,
         firstSeenAt: iso(v.at),
@@ -169,8 +224,8 @@ export function computeBirdStats(rows: Row[], now = Date.now(), timeZone = getBi
       entry.visits++
       if (recent) entry.recentVisits++
       entry.lastSeenAt = iso(v.at)
-      if (!entry.latin && v.latin) entry.latin = v.latin
-      species.set(v.species, entry)
+      if (!entry.latin && name.latin) entry.latin = name.latin
+      species.set(name.key, entry)
     }
   }
 
@@ -190,13 +245,17 @@ export function computeBirdStats(rows: Row[], now = Date.now(), timeZone = getBi
     byDay: [...byDayMap].map(([date, count]) => ({ date, visits: count })),
     records: {
       busiestDay,
-      earliest: earliest ? { at: iso(earliest.v.at), species: earliest.v.species } : null,
-      latest: latest ? { at: iso(latest.v.at), species: latest.v.species } : null,
+      earliest: earliest ? { at: iso(earliest.v.at), species: speciesName(earliest.v) } : null,
+      latest: latest ? { at: iso(latest.v.at), species: speciesName(latest.v) } : null,
       mostBirds: mostBirds && mostBirds.maxCount > 1
-        ? { at: iso(mostBirds.at), count: mostBirds.maxCount, species: mostBirds.species }
+        ? { at: iso(mostBirds.at), count: mostBirds.maxCount, species: speciesName(mostBirds) }
         : null,
     },
   }
+}
+
+function speciesName(v: Visit): string | null {
+  return normalizeSpecies(v.species, v.latin).species
 }
 
 let entry: { at: number; value: BirdStats } | null = null
@@ -206,9 +265,9 @@ let inflight: Promise<BirdStats> | null = null
 export function getBirdStats(): Promise<BirdStats> {
   if (entry && Date.now() - entry.at < STATS_TTL_MS) return Promise.resolve(entry.value)
   if (inflight) return inflight
-  inflight = loadRows()
-    .then((rows) => {
-      const value = computeBirdStats(rows)
+  inflight = loadVisits()
+    .then((visits) => {
+      const value = computeBirdStats(visits)
       entry = { at: Date.now(), value }
       return value
     })
