@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import useSWR from "swr";
-import { Check, Loader2, Pencil, X } from "lucide-react";
+import { Check, ChevronRight, Loader2, Pencil, X } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -101,6 +102,19 @@ export function BirdAiUsageSection() {
           </dl>
 
           <BirdAiScheduleSection />
+
+          <Link
+            href="/dashboard/birdfeeder/labels"
+            className="flex items-center justify-between gap-3 rounded-xl bg-muted/40 px-3 py-2.5 text-sm transition-colors hover:bg-muted/60"
+          >
+            <span>
+              <span className="font-medium">Разметка снимков</span>
+              <span className="block text-xs text-muted-foreground">
+                Ответить «птица или нет» по архиву и проверить модель
+              </span>
+            </span>
+            <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+          </Link>
 
           {data.days.length > 0 && (
             <div>

@@ -37,7 +37,9 @@ export function DashboardShell({ children, actions }: DashboardShellProps) {
               {NAV_ITEMS.map(({ href, label, icon: Icon, key }) => {
                 const active =
                   key === 'devices'
-                    ? pathname === '/dashboard' || pathname.startsWith('/dashboard/devices')
+                    ? pathname === '/dashboard' ||
+                      pathname.startsWith('/dashboard/devices') ||
+                      pathname.startsWith('/dashboard/birdfeeder')
                     : pathname.startsWith('/dashboard/traffic')
                 return (
                   <Link
