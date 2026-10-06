@@ -19,7 +19,12 @@ export const dynamic = 'force-dynamic'
 
 /*
  * Проверка модели и промпта на размеченных снимках из архива (scripts/015):
- *   POST /api/birdfeeder/eval?limit=20&model=<id>&reference=stored|none
+ *   POST /api/birdfeeder/eval?limit=20&model=<id>&reference=stored|none — запустить
+ *   GET  /api/birdfeeder/eval — состояние: идёт (сколько снимков готово) и последний результат
+ * Прогон идёт в фоне: 20 снимков — около минуты, а прокси перед шлюзом рвёт долгие
+ * запросы, и оплаченный результат терялся. POST отвечает сразу (202), страница
+ * опрашивает GET. Последний результат хранится в памяти процесса до рестарта admin.
+ *
  * Прогоняет последние `limit` снимков с label_bird через текущий промпт и считает
  * точность и полноту «птица/нет», точность вида и цену. Рядом — те же метрики
  * для ответов, сохранённых в БД, по версиям промпта: так видно «до» и «после».
@@ -82,9 +87,35 @@ function metrics(items: Labeled[], threshold = 0) {
   }
 }
 
+type EvalReport = Awaited<ReturnType<typeof runEval>>
+
+type EvalJob = {
+  /** Идущий прогон; null — ничего не идёт */
+  run: { startedAt: string; done: number; total: number; model: string } | null
+  last: { finishedAt: string; report: EvalReport } | null
+  /** Ошибка последнего запуска, если он не дошёл до конца */
+  error: string | null
+}
+
+// globalThis: POST и GET могут оказаться в разных копиях модуля
+const job = ((globalThis as unknown as { __birdEval?: EvalJob }).__birdEval ??= {
+  run: null,
+  last: null,
+  error: null,
+})
+
+export type BirdEvalState = EvalJob
+
+function state(): EvalJob {
+  return { run: job.run, last: job.last, error: job.error }
+}
+
 export async function POST(request: NextRequest) {
   if (!isBirdAiEnabled()) {
     return NextResponse.json({ error: 'AI_GATEWAY_API_KEY is not set' }, { status: 503 })
+  }
+  if (job.run) {
+    return NextResponse.json({ ...state(), error: 'eval is already running' }, { status: 409 })
   }
   const params = request.nextUrl.searchParams
   const limit = Math.min(MAX_LIMIT, Math.max(1, Number(params.get('limit')) || DEFAULT_LIMIT))
@@ -110,6 +141,35 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `daily limit: no room for ${rows.length} calls` }, { status: 429 })
   }
 
+  // Прогон в фоне: ответ уходит сразу, результат заберёт GET
+  job.run = { startedAt: new Date().toISOString(), done: 0, total: rows.length, model }
+  job.error = null
+  void runEval(rows, model, useReference, (done) => {
+    if (job.run) job.run.done = done
+  })
+    .then((report) => {
+      job.last = { finishedAt: new Date().toISOString(), report }
+    })
+    .catch((e: unknown) => {
+      job.error = (e as Error).message
+      console.error('[BirdAI] eval failed:', e)
+    })
+    .finally(() => {
+      job.run = null
+    })
+  return NextResponse.json(state(), { status: 202, headers: { 'Cache-Control': 'no-store' } })
+}
+
+export async function GET() {
+  return NextResponse.json(state(), { headers: { 'Cache-Control': 'no-store' } })
+}
+
+async function runEval(
+  rows: LabeledRow[],
+  model: string,
+  useReference: boolean,
+  onProgress: (done: number) => void,
+) {
   const labelKey = (r: LabeledRow) =>
     r.label_bird && r.label_species_latin ? normalizeSpecies(null, r.label_species_latin).key : null
 
@@ -137,6 +197,7 @@ export async function POST(request: NextRequest) {
       costUsd += cost ?? 0
       results.push({ id: r.id, label: r.label_bird, error: (e as Error).message })
     }
+    onProgress(results.length)
   }
 
   // Ответы из БД на тех же снимках — по версиям промпта
@@ -153,25 +214,22 @@ export async function POST(request: NextRequest) {
     stored.set(version, list)
   }
 
-  return NextResponse.json(
-    {
-      model,
-      reference: useReference,
-      /** Порог, с которым работает цикл (BIRD_AI_MIN_BIRD_CONFIDENCE); current — без порога */
-      minBirdConfidence: getBirdAiMinBirdConfidence(),
-      current: {
-        ...metrics(current),
-        byThreshold: [...new Set([...THRESHOLDS, getBirdAiMinBirdConfidence()])]
-          .sort((a, b) => a - b)
-          .map((t) => ({ threshold: t, ...metrics(current, t) })),
-        errors: results.filter((r) => r.error).length,
-        costUsd,
-        avgCostUsd: current.length ? costUsd / current.length : null,
-        avgMs: current.length ? Math.round(ms / current.length) : null,
-      },
-      stored: Object.fromEntries([...stored].map(([v, items]) => [v, metrics(items)])),
-      results,
+  return {
+    model,
+    reference: useReference,
+    /** Порог, с которым работает цикл (BIRD_AI_MIN_BIRD_CONFIDENCE); current — без порога */
+    minBirdConfidence: getBirdAiMinBirdConfidence(),
+    current: {
+      ...metrics(current),
+      byThreshold: [...new Set([...THRESHOLDS, getBirdAiMinBirdConfidence()])]
+        .sort((a, b) => a - b)
+        .map((t) => ({ threshold: t, ...metrics(current, t) })),
+      errors: results.filter((r) => r.error).length,
+      costUsd,
+      avgCostUsd: current.length ? costUsd / current.length : null,
+      avgMs: current.length ? Math.round(ms / current.length) : null,
     },
-    { headers: { 'Cache-Control': 'no-store' } },
-  )
+    stored: Object.fromEntries([...stored].map(([v, items]) => [v, metrics(items)])),
+    results,
+  }
 }

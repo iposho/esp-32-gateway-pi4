@@ -424,16 +424,34 @@ type EvalResponse = {
   results: Array<{ id: number; label: boolean; bird?: boolean; birdConfidence?: number | null; error?: string }>;
 };
 
+/** Ответ GET/POST /api/birdfeeder/eval: идущий прогон и последний результат */
+type EvalState = {
+  run: { startedAt: string; done: number; total: number; model: string } | null;
+  last: { finishedAt: string; report: EvalResponse } | null;
+  error: string | null;
+};
+
 const EVAL_LIMITS = [20, 50];
+/** Как часто спрашивать сервер, пока прогон идёт */
+const EVAL_POLL_MS = 2_000;
 
 /**
  * Прогон /api/birdfeeder/eval: платный, поэтому только по кнопке и с подтверждением цены.
+ * Идёт на сервере в фоне (долгий запрос рвёт прокси): страница опрашивает состояние,
+ * показывает прогресс и последний результат — он переживает перезагрузку страницы.
  * Показывает точность и полноту по порогам и снимки, где модель ошиблась.
  */
 function EvalPanel({ labeled }: { labeled: number }) {
   const [limit, setLimit] = useState(20);
-  const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<EvalResponse | null>(null);
+  const [starting, setStarting] = useState(false);
+  const { data: evalState, mutate: mutateEval } = useSWR<EvalState>(
+    "/api/birdfeeder/eval",
+    (url: string) => json<EvalState>(url),
+    { refreshInterval: (latest) => (latest?.run ? EVAL_POLL_MS : 0) },
+  );
+  const run = evalState?.run ?? null;
+  const running = starting || run !== null;
+  const result = evalState?.last?.report ?? null;
   const { data: usage } = useSWR("/api/birdfeeder/usage", (url: string) => json<BirdAiUsage>(url));
 
   const calls = Math.min(limit, labeled);
@@ -442,19 +460,22 @@ function EvalPanel({ labeled }: { labeled: number }) {
       ? `≈ $${(usage.avgPhotoUsd * calls).toFixed(4)}`
       : "цена неизвестна";
 
-  async function run() {
+  async function start() {
     const ok = window.confirm(
       `Прогнать ${calls} размеченных снимков через модель?\n` +
         `Это ${calls} платных вызовов (${estimate}), они входят в дневной лимит.`,
     );
     if (!ok) return;
-    setRunning(true);
+    setStarting(true);
     try {
-      setResult(await json<EvalResponse>(`/api/birdfeeder/eval?limit=${limit}`, { method: "POST" }));
+      await mutateEval(json<EvalState>(`/api/birdfeeder/eval?limit=${limit}`, { method: "POST" }), {
+        revalidate: false,
+      });
     } catch (e) {
-      toast.error(`Проверка не удалась: ${(e as Error).message}`);
+      toast.error(`Проверка не запустилась: ${(e as Error).message}`);
+      void mutateEval();
     } finally {
-      setRunning(false);
+      setStarting(false);
     }
   }
 
@@ -492,16 +513,29 @@ function EvalPanel({ labeled }: { labeled: number }) {
               </option>
             ))}
           </select>
-          <Button size="sm" onClick={() => void run()} disabled={running || labeled === 0}>
+          <Button size="sm" onClick={() => void start()} disabled={running || labeled === 0}>
             {running && <Loader2 className="size-3.5 animate-spin" />}
             Проверить
           </Button>
         </div>
       </div>
 
+      {run && (
+        <p className="mt-3 text-sm text-muted-foreground" aria-live="polite">
+          Идёт проверка: {run.done} из {run.total} снимков. Страницу можно закрыть — результат
+          останется здесь.
+        </p>
+      )}
+      {!run && evalState?.error && (
+        <p className="mt-3 text-sm text-destructive">
+          Последняя проверка не завершилась: {evalState.error}
+        </p>
+      )}
+
       {result && (
         <div className="mt-4 space-y-4 text-sm">
           <p className="text-xs text-muted-foreground">
+            {evalState?.last ? `${formatDate(evalState.last.finishedAt)} · ` : ""}
             {result.model}
             {result.reference ? " · с кадром для сравнения, где он был" : ""} · {result.current.n} снимков ·
             ${result.current.costUsd.toFixed(4)}

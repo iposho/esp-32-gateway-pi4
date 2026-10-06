@@ -50,7 +50,8 @@ esp32-bird-cam (LAN)                         Pi: esp32-admin                    
 | PUT | `/api/birdfeeder/budget` | `{ amountUsd }` — остаток кредитов кормушки |
 | GET, PUT | `/api/birdfeeder/schedule` | часы работы распознавания |
 | POST | `/api/birdfeeder/classify?id=N` | JSON — прогнать снимок N с SD через модель с текущим промптом. В БД не пишет, но вызов платный и **входит в дневной лимит**. Раньше — `/api/camera/birdfeeder/classify` |
-| POST | `/api/birdfeeder/eval?limit=20&model=…&reference=stored\|none` | JSON — проверка модели на размеченных снимках из архива (раздел «Проверка модели»). Платно, входит в дневной лимит, `limit` ≤ 50 |
+| POST | `/api/birdfeeder/eval?limit=20&model=…&reference=stored\|none` | Запустить проверку модели на размеченных снимках из архива (раздел «Проверка модели»). Отвечает сразу, 202 и состояние: прогон идёт в фоне, потому что 20 снимков — около минуты, а прокси перед шлюзом рвёт долгие запросы. 409 — прогон уже идёт. Платно, входит в дневной лимит, `limit` ≤ 50 |
+| GET | `/api/birdfeeder/eval` | JSON `{ run, last, error }`: `run { done, total, model, startedAt }` — идущий прогон или `null`; `last { finishedAt, report }` — последний результат (в памяти процесса, до рестарта `admin`); `error` — почему последний запуск не завершился |
 | GET | `/api/birdfeeder/photo?detection=ID` | JPEG — снимок из архива по `bird_detections.id`, для разметки |
 | GET | `/api/birdfeeder/labels?filter=…&before=ID` | JSON `{ items, nextBefore, counts }` — снимки архива для разметки по 24, новые первыми. `filter`: `unlabeled` (по умолчанию), `uncertain` (`bird_confidence` 0,3–0,7), `model-bird`, `model-nobird` (всё — неразмеченные), `labeled` |
 | PUT | `/api/birdfeeder/labels` | `{ id, labelBird: true \| false \| null, speciesLatin: string \| null }` — записать разметку; `labelBird: null` — снять. Вид пишется только у птицы, латынь приводится к единому написанию |
@@ -265,16 +266,19 @@ select id, shot_at, is_bird, bird_confidence, species, confidence, prompt_versio
    ```
 2. **Прогнать** — блок «Проверка модели» на той же странице: выбрать 20 или 50 снимков,
    «Проверить». Перед запуском страница спросит подтверждение и покажет примерную цену
-   (средняя цена снимка × число снимков). Без страницы — из консоли браузера, где выполнен
+   (средняя цена снимка × число снимков). Прогон идёт на сервере в фоне: страница
+   показывает «N из M снимков», её можно закрыть — результат появится в том же блоке и
+   останется там до рестарта `admin`. Без страницы — из консоли браузера, где выполнен
    вход в админку:
    ```js
-   await (await fetch('/api/birdfeeder/eval?limit=20', { method: 'POST' })).json()
+   await fetch('/api/birdfeeder/eval?limit=20', { method: 'POST' })   // запустить
+   await (await fetch('/api/birdfeeder/eval')).json()                 // состояние и результат в last.report
    ```
    Параметры: `model=<id>` — другая модель с тегом vision, `reference=none` — без кадра
    для сравнения (по умолчанию используется тот, что видела модель в цикле, если был).
 3. **Читать ответ:** страница показывает таблицу по порогам (точность, полнота, ложные «да»,
    пропуски), сохранённые ответы по версиям промпта и миниатюры снимков, где модель
-   ошиблась при текущем пороге. Поля JSON:
+   ошиблась при текущем пороге. Поля `last.report`:
    - `current` — текущий промпт: `precision` (доля настоящих птиц среди ответов «птица»),
      `recall` (доля найденных птиц), `speciesAccuracy`, `avgCostUsd`, `avgMs`;
      `byThreshold` — те же метрики, если считать птицей только `bird_confidence` ≥ порога
