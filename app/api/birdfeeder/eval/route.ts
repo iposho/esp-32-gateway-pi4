@@ -25,7 +25,8 @@ export const dynamic = 'force-dynamic'
  * запросы, и оплаченный результат терялся. POST отвечает сразу (202), страница
  * опрашивает GET. Последний результат хранится в памяти процесса до рестарта admin.
  *
- * Прогоняет последние `limit` снимков с label_bird через текущий промпт и считает
+ * Прогоняет `limit` размеченных снимков (пополам с птицей и без, в каждой половине
+ * последние; если одних не хватает — добирает другими) через текущий промпт и считает
  * точность и полноту «птица/нет», точность вида и цену. Рядом — те же метрики
  * для ответов, сохранённых в БД, по версиям промпта: так видно «до» и «после».
  * В БД не пишет. Вызовы платные и входят в дневной лимит, поэтому limit ≤ 50.
@@ -122,18 +123,27 @@ export async function POST(request: NextRequest) {
   const model = params.get('model') || getBirdAiModel()
   const useReference = params.get('reference') !== 'none'
 
-  const { data, error } = await getServiceClient()
-    .from('bird_detections')
-    .select(
-      'id, is_bird, bird_confidence, species, species_latin, prompt_version, photo_path, reference_path, label_bird, label_species_latin',
-    )
-    .eq('device_id', getBirdfeederDeviceId())
-    .not('label_bird', 'is', null)
-    .not('photo_path', 'is', null)
-    .order('id', { ascending: false })
-    .limit(limit)
+  // Набор пополам из снимков с птицей и без: по одним «нет» не посчитать ни точность,
+  // ни полноту. Если одних не хватает, добираем другими. В каждой половине — последние.
+  const labeled = (bird: boolean) =>
+    getServiceClient()
+      .from('bird_detections')
+      .select(
+        'id, is_bird, bird_confidence, species, species_latin, prompt_version, photo_path, reference_path, label_bird, label_species_latin',
+      )
+      .eq('device_id', getBirdfeederDeviceId())
+      .eq('label_bird', bird)
+      .not('photo_path', 'is', null)
+      .order('id', { ascending: false })
+      .limit(limit)
+  const [birdsRes, emptyRes] = await Promise.all([labeled(true), labeled(false)])
+  const error = birdsRes.error ?? emptyRes.error
   if (error) return NextResponse.json({ error: `${error.message} (scripts/015?)` }, { status: 503 })
-  const rows = (data ?? []) as LabeledRow[]
+  const birds = (birdsRes.data ?? []) as LabeledRow[]
+  const empty = (emptyRes.data ?? []) as LabeledRow[]
+  const half = Math.ceil(limit / 2)
+  const birdsTake = Math.min(birds.length, Math.max(half, limit - empty.length))
+  const rows = [...birds.slice(0, birdsTake), ...empty.slice(0, limit - birdsTake)].sort((a, b) => b.id - a.id)
   if (rows.length === 0) {
     return NextResponse.json({ error: 'no labeled photos: set label_bird in bird_detections' }, { status: 404 })
   }

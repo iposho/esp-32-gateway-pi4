@@ -543,6 +543,24 @@ function EvalPanel({ labeled }: { labeled: number }) {
             {result.current.errors > 0 ? ` · ошибок: ${result.current.errors}` : ""}
           </p>
 
+          <p className="text-xs text-muted-foreground">
+            В наборе: с птицей — {result.current.tp + result.current.fn}, без птицы —{" "}
+            {result.current.fp + result.current.tn}. Верных «нет» — {result.current.tn}.
+          </p>
+          {result.current.tp + result.current.fn === 0 && (
+            <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+              В наборе нет снимков с птицей, поэтому точность и полноту не посчитать и порог
+              не выбрать. Разметьте хотя бы 10–15 снимков с птицами (фильтр «Модель: птица»)
+              и запустите проверку ещё раз.
+            </p>
+          )}
+          {result.current.fp + result.current.tn === 0 && (
+            <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+              В наборе нет снимков без птицы: ложные «да» не проверить. Разметьте 10–15 таких
+              снимков (фильтр «Модель: нет» или «Спорные»).
+            </p>
+          )}
+
           <div className="overflow-x-auto">
             <table className="w-full min-w-[28rem] tabular-nums">
               <thead className="text-xs text-muted-foreground">
@@ -560,7 +578,7 @@ function EvalPanel({ labeled }: { labeled: number }) {
               </thead>
               <tbody>
                 <MetricsRow label="без порога" m={result.current} />
-                {result.current.byThreshold.map((t) => (
+                {result.current.byThreshold.filter((t) => t.threshold > 0).map((t) => (
                   <MetricsRow
                     key={t.threshold}
                     label={`≥ ${t.threshold}${t.threshold === threshold && threshold > 0 ? " (сейчас)" : ""}`}
