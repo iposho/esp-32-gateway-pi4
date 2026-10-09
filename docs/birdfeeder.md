@@ -142,8 +142,14 @@ admin, раз в 15 с (lib/bird-classifier.ts):
   (и с птицей, и без, и с ошибкой), сохраняется в приватный бакет Storage `bird-photos`
   как `<device>/<дата UTC>/<id>-<epoch>.jpg`, путь — в `photo_path`. Ночные и тёмные
   снимки не сохраняются. Объём: не больше `BIRD_AI_DAILY_LIMIT` снимков в сутки по 20–60 КБ,
-  то есть до ~18 МБ в сутки при упоре в лимит; автоудаления нет. `BIRD_AI_SAVE_PHOTOS=0` —
-  не сохранять. Если бакета нет, в логе одно предупреждение и архив выключается до рестарта.
+  то есть до ~18 МБ в сутки при упоре в лимит. `BIRD_AI_SAVE_PHOTOS=0` — не сохранять.
+  **Автоудаление:** раз в сутки (и через 5 минут после старта `admin`) из архива удаляются
+  неразмеченные снимки старше `BIRD_AI_PHOTO_RETENTION_DAYS` (по умолчанию 90 дней,
+  `0` — не удалять). Строки `bird_detections` остаются, у них очищается `photo_path`:
+  статистика и визиты не меняются, но такой снимок уже не разметить. Не удаляются:
+  размеченные снимки (набор для проверки модели), кадры для сравнения, на которые
+  ссылаются размеченные строки, и снимок последней подтверждённой птицы (его показывает
+  дисплей). В логе: `[BirdAI] archive cleanup: removed N unlabeled photos older than 90 days`. Если бакета нет, в логе одно предупреждение и архив выключается до рестарта.
 - **Часы работы** настраиваются в дашборде на карточке камеры (таблица `bird_ai_settings`,
   scripts/014): вне рабочего окна снимки не забираются с камеры и сразу пишутся
   с `model='filter:night'`. Птицы у кормушки дневные, а свет лампы или фонаря обманывает
@@ -225,7 +231,7 @@ admin, раз в 15 с (lib/bird-classifier.ts):
    без новых колонок и считает статистику по-старому (в логе предупреждения).
 2. В `.env` на Pi: `AI_GATEWAY_API_KEY=…` (vercel.com → AI Gateway → API Keys),
    по желанию `BIRD_AI_MODEL`, `BIRD_AI_DAILY_LIMIT`, `BIRDFEEDER_REGION`, `BIRDFEEDER_TZ`,
-   `BIRD_AI_SAVE_PHOTOS`, `BIRD_AI_REFERENCE`.
+   `BIRD_AI_SAVE_PHOTOS`, `BIRD_AI_PHOTO_RETENTION_DAYS`, `BIRD_AI_REFERENCE`.
 3. `docker compose up -d --build admin`, в логе: `[BirdAI] started, model …`.
 4. После следующего визита: `docker logs esp32-admin | grep BirdAI` — строки
    `photo N: bird ×1 Большая синица 87% (bird 95%, luma …, … tok)` или `no bird (bird 5%, …)`;
