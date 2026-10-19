@@ -28,6 +28,8 @@ import {
   Circle,
   Sun,
   Thermometer,
+  Volume2,
+  Music,
   type LucideIcon,
 } from "lucide-react";
 import type { CommandDef } from "@/lib/types";
@@ -48,6 +50,8 @@ const ICON_MAP: Record<string, LucideIcon> = {
   dot: Circle,
   sun: Sun,
   thermometer: Thermometer,
+  "volume-2": Volume2,
+  music: Music,
 };
 
 /** Получить компонент иконки по строковому идентификатору из скетча */
