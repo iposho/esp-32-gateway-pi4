@@ -9,6 +9,7 @@ import {
   getCommandIcon,
   getRangeBounds,
   getRangeState,
+  getSelectState,
   getToggleState,
   isDangerousCommand,
 } from "@/lib/commands";
@@ -35,12 +36,12 @@ const DONE_FLASH_MS = 2500;
 /** Задержка отправки значения ползунка после последнего движения */
 const RANGE_DEBOUNCE_MS = 400;
 
-type Pending = { desired?: boolean | number; sentAt: number };
+type Pending = { desired?: boolean | number | string; sentAt: number };
 
 /**
  * Отправка команд + отслеживание их выполнения.
  * Команда считается выполненной, когда в телеметрии появилось нужное
- * значение (toggle/range) или просто пришла новая телеметрия (trigger).
+ * значение (toggle/range/select) или просто пришла новая телеметрия (trigger).
  */
 export function useDeviceCommands(
   device: DeviceWithLatest,
@@ -64,7 +65,7 @@ export function useDeviceCommands(
 
   /**
    * Команда выполнена, если в телеметрии появилось нужное значение
-   * (toggle/range) или, для команд без значения (trigger), пришла свежая
+   * (toggle/range/select) или, для команд без значения (trigger), пришла свежая
    * телеметрия после отправки.
    */
   const isConfirmed = useCallback(
@@ -74,6 +75,9 @@ export function useDeviceCommands(
       }
       if (typeof p.desired === "number") {
         return getRangeState(payload, action) === p.desired;
+      }
+      if (typeof p.desired === "string") {
+        return String(getSelectState(payload, action)) === p.desired;
       }
       return latestAt > p.sentAt;
     },
@@ -130,7 +134,7 @@ export function useDeviceCommands(
   }, [pending, isConfirmed, flashDone]);
 
   const send = useCallback(
-    async (cmd: CommandDef, value?: boolean | number) => {
+    async (cmd: CommandDef, value?: boolean | number | string) => {
       titles.current[cmd.action] = cmd.title;
       setPending((prev) => ({
         ...prev,
@@ -264,6 +268,23 @@ export function DeviceControls({
               disabled={!online}
               status={<StatusMark pending={isPending} done={isDone} />}
               onCommit={(value) => void send(cmd, value)}
+            />
+          );
+        }
+
+        if (cmd.type === "select") {
+          const currentVal = getSelectState(payload, cmd.action);
+          const rawVal = p?.desired !== undefined ? p.desired : currentVal;
+          const shownVal = typeof rawVal === "boolean" ? undefined : rawVal;
+          return (
+            <SelectRow
+              key={cmd.action}
+              cmd={cmd}
+              icon={<Icon className="size-4" aria-hidden />}
+              value={shownVal}
+              disabled={!online || isPending}
+              status={<StatusMark pending={isPending} done={isDone} />}
+              onChange={(value) => void send(cmd, value)}
             />
           );
         }
@@ -440,6 +461,53 @@ function RangeRow({
         aria-label={cmd.title}
         className="mt-3 h-2 w-full cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-50"
       />
+    </div>
+  );
+}
+
+function SelectRow({
+  cmd,
+  icon,
+  value,
+  disabled,
+  status,
+  onChange,
+}: {
+  cmd: CommandDef;
+  icon: React.ReactNode;
+  value: number | string | undefined;
+  disabled: boolean;
+  status: React.ReactNode;
+  onChange: (value: number | string) => void;
+}) {
+  const options = cmd.options ?? [];
+  const currentStr = value !== undefined ? String(value) : "";
+
+  return (
+    <div className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
+      <RowLabel icon={icon} title={cmd.title} description={cmd.description} />
+      <div className="flex shrink-0 items-center gap-2">
+        {status}
+        <select
+          value={currentStr}
+          disabled={disabled || options.length === 0}
+          onChange={(e) => {
+            const raw = e.target.value;
+            // Если исходный тип опции число — отдаем число
+            const matched = options.find((opt) => String(opt.value) === raw);
+            onChange(matched ? matched.value : raw);
+          }}
+          aria-label={cmd.title}
+          className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {options.length === 0 && <option value="">Нет вариантов</option>}
+          {options.map((opt) => (
+            <option key={String(opt.value)} value={String(opt.value)}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+      </div>
     </div>
   );
 }

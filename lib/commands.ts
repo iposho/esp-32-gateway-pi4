@@ -111,6 +111,16 @@ export function getRangeState(
   return Number.isFinite(raw) ? raw : undefined;
 }
 
+/** Текущее значение select-команды из телеметрии */
+export function getSelectState(
+  payload: Record<string, unknown> | undefined,
+  action: string,
+): number | string | undefined {
+  const val = payload?.[action];
+  if (typeof val === "number" || typeof val === "string") return val;
+  return undefined;
+}
+
 export function getRangeBounds(cmd: CommandDef) {
   const min = Number.isFinite(cmd.min) ? (cmd.min as number) : 0;
   const max = Number.isFinite(cmd.max) ? (cmd.max as number) : 100;

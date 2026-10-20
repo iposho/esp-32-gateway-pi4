@@ -62,11 +62,16 @@ export type DeviceMetadata = Record<string, unknown> & {
   sort_order?: number;
 };
 
+export type CommandOption = {
+  label: string;
+  value: number | string;
+};
+
 export type CommandDef = {
   action: string;
   title: string;
-  /** toggle — вкл/выкл, trigger — разовое действие, range — значение min…max */
-  type: "toggle" | "trigger" | "range";
+  /** toggle — вкл/выкл, trigger — разовое действие, range — значение min…max, select — выбор из списка */
+  type: "toggle" | "trigger" | "range" | "select";
   icon?: string;
   description?: string;
   /** Для range: границы, шаг и единица (по умолчанию 0…100, шаг 1) */
@@ -74,6 +79,8 @@ export type CommandDef = {
   max?: number;
   step?: number;
   unit?: string;
+  /** Для select: список доступных вариантов */
+  options?: CommandOption[];
 };
 
 export type Telemetry = {
