@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Loader2 } from "lucide-react";
+import { Check, Loader2, Play, Volume2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { playSignalInBrowser } from "@/lib/sound-synth";
 import {
   getCommandIcon,
   getRangeBounds,
@@ -276,15 +277,27 @@ export function DeviceControls({
           const currentVal = getSelectState(payload, cmd.action);
           const rawVal = p?.desired !== undefined ? p.desired : currentVal;
           const shownVal = typeof rawVal === "boolean" ? undefined : rawVal;
+          const currentVol = getRangeState(payload, "sound_volume") ?? 80;
           return (
             <SelectRow
               key={cmd.action}
               cmd={cmd}
               icon={<Icon className="size-4" aria-hidden />}
               value={shownVal}
+              volume={currentVol}
               disabled={!online || isPending}
               status={<StatusMark pending={isPending} done={isDone} />}
               onChange={(value) => void send(cmd, value)}
+              onPlayDevice={
+                cmd.action === "sound_signal"
+                  ? (sig) => {
+                      const testCmd = commands.find((c) => c.action === "sound_test");
+                      if (testCmd) {
+                        void send(testCmd, Number(sig));
+                      }
+                    }
+                  : undefined
+              }
             />
           );
         }
@@ -469,36 +482,47 @@ function SelectRow({
   cmd,
   icon,
   value,
+  volume = 80,
   disabled,
   status,
   onChange,
+  onPlayDevice,
 }: {
   cmd: CommandDef;
   icon: React.ReactNode;
   value: number | string | undefined;
+  volume?: number;
   disabled: boolean;
   status: React.ReactNode;
   onChange: (value: number | string) => void;
+  onPlayDevice?: (sig: number | string) => void;
 }) {
   const options = cmd.options ?? [];
   const currentStr = value !== undefined ? String(value) : "";
+  const [playingBrowser, setPlayingBrowser] = useState(false);
+
+  function handlePlayBrowser() {
+    const sigId = Number(value ?? 0);
+    setPlayingBrowser(true);
+    playSignalInBrowser(sigId, volume);
+    setTimeout(() => setPlayingBrowser(false), 900);
+  }
 
   return (
     <div className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
       <RowLabel icon={icon} title={cmd.title} description={cmd.description} />
-      <div className="flex shrink-0 items-center gap-2">
+      <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
         {status}
         <select
           value={currentStr}
           disabled={disabled || options.length === 0}
           onChange={(e) => {
             const raw = e.target.value;
-            // Если исходный тип опции число — отдаем число
             const matched = options.find((opt) => String(opt.value) === raw);
             onChange(matched ? matched.value : raw);
           }}
           aria-label={cmd.title}
-          className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+          className="h-9 rounded-md border border-input bg-background px-2.5 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
         >
           {options.length === 0 && <option value="">Нет вариантов</option>}
           {options.map((opt) => (
@@ -507,6 +531,33 @@ function SelectRow({
             </option>
           ))}
         </select>
+        {cmd.action === "sound_signal" && (
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className={cn("size-9 shrink-0", playingBrowser && "text-primary")}
+              title="Прослушать в браузере"
+              onClick={handlePlayBrowser}
+            >
+              <Play className={cn("size-4", playingBrowser && "fill-current")} />
+            </Button>
+            {onPlayDevice && (
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="size-9 shrink-0"
+                disabled={disabled}
+                title="Тест на динамике ESP32"
+                onClick={() => onPlayDevice(value ?? 0)}
+              >
+                <Volume2 className="size-4" />
+              </Button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
