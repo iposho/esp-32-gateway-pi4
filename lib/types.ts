@@ -70,8 +70,8 @@ export type CommandOption = {
 export type CommandDef = {
   action: string;
   title: string;
-  /** toggle — вкл/выкл, trigger — разовое действие, range — значение min…max, select — выбор из списка */
-  type: "toggle" | "trigger" | "range" | "select";
+  /** toggle — вкл/выкл, trigger — разовое действие, range — значение min…max, select — выбор из списка, text — ввод строки */
+  type: "toggle" | "trigger" | "range" | "select" | "text";
   icon?: string;
   description?: string;
   /** Для range: границы, шаг и единица (по умолчанию 0…100, шаг 1) */
@@ -81,6 +81,9 @@ export type CommandDef = {
   unit?: string;
   /** Для select: список доступных вариантов */
   options?: CommandOption[];
+  /** Для text: подсказка в пустом поле и максимальная длина (символов) */
+  placeholder?: string;
+  max_length?: number;
 };
 
 export type Telemetry = {

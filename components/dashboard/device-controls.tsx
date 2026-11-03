@@ -302,6 +302,21 @@ export function DeviceControls({
           );
         }
 
+        if (cmd.type === "text") {
+          const current = getSelectState(payload, cmd.action);
+          return (
+            <TextRow
+              key={cmd.action}
+              cmd={cmd}
+              icon={<Icon className="size-4" aria-hidden />}
+              value={current === undefined ? undefined : String(current)}
+              disabled={!online || isPending}
+              status={<StatusMark pending={isPending} done={isDone} />}
+              onSubmit={(value) => void send(cmd, value)}
+            />
+          );
+        }
+
         return (
           <div
             key={cmd.action}
@@ -474,6 +489,65 @@ function RangeRow({
         aria-label={cmd.title}
         className="mt-3 h-2 w-full cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-50"
       />
+    </div>
+  );
+}
+
+/** Текстовое поле + «Сохранить»; пустая строка тоже отправляется (очистка значения) */
+function TextRow({
+  cmd,
+  icon,
+  value,
+  disabled,
+  status,
+  onSubmit,
+}: {
+  cmd: CommandDef;
+  icon: React.ReactNode;
+  value: string | undefined;
+  disabled: boolean;
+  status: React.ReactNode;
+  onSubmit: (value: string) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? value ?? "";
+  const dirty = draft !== null && draft.trim() !== (value ?? "");
+
+  function submit() {
+    if (!dirty || draft === null) return;
+    onSubmit(draft.trim());
+    setDraft(null);
+  }
+
+  return (
+    <div className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+      <RowLabel icon={icon} title={cmd.title} description={cmd.description} />
+      <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+        {status}
+        <input
+          type="text"
+          value={shown}
+          disabled={disabled}
+          maxLength={cmd.max_length}
+          placeholder={cmd.placeholder}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") submit();
+          }}
+          aria-label={cmd.title}
+          className="h-9 w-full min-w-0 rounded-md border border-input bg-background px-2.5 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 sm:w-52"
+        />
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-9 px-3"
+          disabled={disabled || !dirty}
+          onClick={submit}
+        >
+          Сохранить
+        </Button>
+      </div>
     </div>
   );
 }
