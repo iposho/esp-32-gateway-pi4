@@ -1,0 +1,11 @@
+[Unit]
+Description=ESP32 gateway Wi-Fi watchdog (Telegram alerts)
+Documentation=file://@REPO_DIR@/scripts/wifi-watchdog.sh
+After=NetworkManager.service network-online.target
+Wants=NetworkManager.service network-online.target
+
+[Service]
+Type=oneshot
+Environment=ENV_FILE=@REPO_DIR@/.env
+Environment=STATE_DIR=/var/lib/esp32-wifi-watchdog
+ExecStart=/usr/bin/env bash @REPO_DIR@/scripts/wifi-watchdog.sh

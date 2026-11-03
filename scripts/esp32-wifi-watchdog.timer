@@ -1,0 +1,11 @@
+[Unit]
+Description=Run ESP32 gateway Wi-Fi watchdog every minute
+
+[Timer]
+OnBootSec=90s
+OnUnitActiveSec=60s
+AccuracySec=10s
+Unit=esp32-wifi-watchdog.service
+
+[Install]
+WantedBy=timers.target
