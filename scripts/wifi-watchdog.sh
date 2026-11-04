@@ -114,6 +114,7 @@ format_duration() {
 if [[ "$healthy" -eq 1 ]]; then
   if [[ "$prev_status" == "down" ]]; then
     downtime="$((now - since))"
+    echo "wifi-watchdog: ${WIFI_IFACE} восстановлен, простой $(format_duration "$downtime")"
     telegram_send "$(cat <<EOF
 📶 <b>Wi-Fi на шлюзе восстановлен</b>
 Интерфейс <code>${WIFI_IFACE}</code> снова в сети, простой $(format_duration "$downtime").
@@ -129,10 +130,12 @@ fi
 if [[ "$prev_status" != "down" ]]; then
   since="$now"
   notified="0"
+  echo "wifi-watchdog: ${WIFI_IFACE} не в сети (${iface_line:-нет данных})"
 fi
 
 silent_for="$((now - since))"
 if [[ "$notified" != "1" ]] && (( silent_for >= WIFI_WATCHDOG_FAIL_SECONDS )); then
+  echo "wifi-watchdog: ${WIFI_IFACE} недоступен $(format_duration "$silent_for"), отправляю алерт"
   details="<code>${iface_line:-${WIFI_IFACE}: нет данных}</code>"
   telegram_send "$(cat <<EOF
 🚨 <b>Wi-Fi на шлюзе пропал</b>
