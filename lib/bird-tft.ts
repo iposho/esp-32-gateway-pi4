@@ -5,13 +5,13 @@ import { getBirdPhoto, getBirdfeederDeviceId, shotKey } from '@/lib/birdfeeder'
 import { getServiceClient } from '@/lib/supabase/server'
 
 /**
- * Последняя подтверждённая птица для экрана esp32-flat (ST7735 160×128):
+ * Последняя подтверждённая птица для экрана esp32-flat (дисплей, фото 240×180):
  * готовая картинка RGB565, чтобы плата не декодировала JPEG, а лила байты
- * прямо в дисплей. 160×120 — кадр 4:3, снизу остаётся строка под подпись.
+ * прямо в дисплей. 240×180 — кадр 4:3.
  */
 
-export const TFT_WIDTH = 160
-export const TFT_HEIGHT = 120
+export const TFT_WIDTH = 240
+export const TFT_HEIGHT = 180
 
 const DB_TIMEOUT_MS = 5_000
 /** Плата опрашивает раз в полминуты, пока экран открыт; чаще в БД не ходим */

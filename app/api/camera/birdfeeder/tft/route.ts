@@ -11,7 +11,7 @@ export async function OPTIONS() {
 
 /**
  * Последняя подтверждённая птица для дисплея esp32-flat: сырой RGB565
- * little-endian 160×120 (38 400 байт). Плата шлёт If-None-Match с прошлым
+ * little-endian 240×180 (86 400 байт). Плата шлёт If-None-Match с прошлым
  * ETag и получает 304, пока новой птицы нет.
  */
 export async function GET(request: NextRequest) {
